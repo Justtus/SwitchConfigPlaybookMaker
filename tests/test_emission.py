@@ -1,3 +1,8 @@
+import re
+import subprocess
+import sys
+from pathlib import Path
+
 from cisco_to_ansible import Task, render_task
 
 
@@ -20,10 +25,6 @@ def test_task_defaults():
     assert t.origin == []
 
 
-import re
-from pathlib import Path
-import subprocess, sys
-
 ROOT = Path(__file__).parent.parent
 
 
@@ -35,7 +36,7 @@ def _run_tool(tmp_path, flags=()):
          "-o", str(out), *flags],
         capture_output=True, text=True,
     )
-    assert result.returncode in (0, 1), result.stderr
+    assert result.returncode == 0, result.stderr
     return out.read_text(encoding="utf-8")
 
 
@@ -81,11 +82,22 @@ def test_stp_mode_precedes_interface_enable(tmp_path):
     assert stp_pos < iface_pos, "STP mode must be set before interfaces come up"
 
 
-def test_snmp_view_precedes_community(tmp_path):
+def test_snmp_config_precedes_interface_admin_state(tmp_path):
+    """SNMP config (Phase 3) must be applied before interfaces come up (Phase 4).
+
+    The SNMP view must be defined before any snmp-server community line that
+    references it; emitting both within a single Phase 3 ios_config task (with
+    view listed before community) guarantees that, and also ensures the whole
+    SNMP subsystem is configured before interfaces are enabled.
+    """
     text = _run_tool(tmp_path)
+    snmp_pos = _first_index(text, r'"snmp-server view NO_BAD_SNMP iso included"')
+    # Also verify view appears before community within the shared SNMP lines list
     view_pos = _first_index(text, r'"snmp-server view NO_BAD_SNMP iso included"')
     comm_pos = _first_index(text, r'"snmp-server community qu1nngr0up view NO_BAD_SNMP RO"')
-    assert view_pos < comm_pos
+    assert view_pos < comm_pos, "view must be listed before community in the SNMP task"
+    iface_pos = _first_index(text, r'cisco\.ios\.ios_interfaces:')
+    assert snmp_pos < iface_pos, "SNMP config must precede interface admin-state"
 
 
 def test_radius_servers_precede_aaa_auth(tmp_path):

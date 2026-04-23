@@ -585,6 +585,8 @@ def build_playbook(cfg: ParsedConfig, host: str, source_file: str) -> str:
         ))
     for header, ln, children_ln in cfg.vrfs:
         cleaned = [c for c, _ in children_ln if c.strip() != '!']
+        if not cleaned:
+            continue
         task_list.append(Task(
             name=f"Apply block: {_truncate(header)}",
             module="cisco.ios.ios_config",
@@ -605,13 +607,8 @@ def build_playbook(cfg: ParsedConfig, host: str, source_file: str) -> str:
             params=[("lines", lines)],
             origin=list(cfg.stp_globals),
         ))
-    for bucket_name, bucket in [
-        ("ACL", cfg.acls),
-        ("route-map", cfg.route_maps),
-        ("flow record", cfg.flow_records),
-        ("flow exporter", cfg.flow_exporters),
-        ("flow monitor", cfg.flow_monitors),
-    ]:
+    for bucket in (cfg.acls, cfg.route_maps, cfg.flow_records,
+                   cfg.flow_exporters, cfg.flow_monitors):
         for header, ln, children_ln in bucket:
             cleaned = [c for c, _ in children_ln if c.strip() != '!']
             if not cleaned:
