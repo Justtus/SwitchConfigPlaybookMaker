@@ -15,6 +15,7 @@ import argparse
 import os
 import re
 import sys
+from dataclasses import dataclass, field
 from typing import Iterable
 
 
@@ -254,6 +255,26 @@ def _emit_param(key: str, value, prefix: str) -> list[str]:
     return lines
 
 
+@dataclass
+class Task:
+    """An Ansible task in intermediate form, before YAML serialization."""
+    name: str
+    module: str
+    params: list[tuple[str, object]] = field(default_factory=list)
+    # Back-reference to source blocks for validators:
+    # list of (header, header_lineno, children_with_ln).
+    origin: list[tuple[str, int, list[tuple[str, int]]]] = field(default_factory=list)
+
+
+def render_task(task: Task, indent: int = 4) -> list[str]:
+    """Render a Task as YAML lines. Drops the trailing blank separator line
+    emitted by the low-level emit_task helper; the playbook assembler joins
+    tasks with explicit blank lines."""
+    rendered = emit_task(task.name, task.module, task.params, indent=indent)
+    # emit_task appends a trailing '' for visual separation; strip it.
+    return rendered[:-1] if rendered and rendered[-1] == '' else rendered
+
+
 # ---------------------------------------------------------------------------
 # Playbook builder
 # ---------------------------------------------------------------------------
@@ -354,13 +375,13 @@ def build_playbook(blocks: list[tuple[str, int, list[tuple[str, int]]]],
         '  tasks:',
     ]
 
-    tasks: list[str] = []
+    task_list: list[Task] = []
 
     if hostname:
-        tasks.extend(emit_task(
-            f'Configure hostname {hostname}',
-            'cisco.ios.ios_hostname',
-            [('config', {'hostname': hostname}), ('state', 'merged')],
+        task_list.append(Task(
+            name=f'Configure hostname {hostname}',
+            module='cisco.ios.ios_hostname',
+            params=[('config', {'hostname': hostname}), ('state', 'merged')],
         ))
 
     if domain_name or name_servers:
@@ -374,14 +395,17 @@ def build_playbook(blocks: list[tuple[str, int, list[tuple[str, int]]]],
             system['name_servers'] = name_servers
         params.append(('config', system))
         params.append(('state', 'merged'))
-        tasks.extend(emit_task('Configure domain and name servers',
-                               'cisco.ios.ios_system', params))
+        task_list.append(Task(
+            name='Configure domain and name servers',
+            module='cisco.ios.ios_system',
+            params=params,
+        ))
 
     if vlans:
-        tasks.extend(emit_task(
-            'Configure VLAN database',
-            'cisco.ios.ios_vlans',
-            [('config', vlans), ('state', 'merged')],
+        task_list.append(Task(
+            name='Configure VLAN database',
+            module='cisco.ios.ios_vlans',
+            params=[('config', vlans), ('state', 'merged')],
         ))
 
     # Interfaces split across three structured modules + raw residue.
@@ -419,24 +443,24 @@ def build_playbook(blocks: list[tuple[str, int, list[tuple[str, int]]]],
                                   'ipv4': [{'address': a} for a in ifc['ipv4']]}
                 l3_cfg.append(l3_entry)
 
-        tasks.extend(emit_task(
-            'Configure interface admin state and descriptions',
-            'cisco.ios.ios_interfaces',
-            [('config', iface_state), ('state', 'merged')],
+        task_list.append(Task(
+            name='Configure interface admin state and descriptions',
+            module='cisco.ios.ios_interfaces',
+            params=[('config', iface_state), ('state', 'merged')],
         ))
 
         if l2_cfg:
-            tasks.extend(emit_task(
-                'Configure L2 interface properties (switchport)',
-                'cisco.ios.ios_l2_interfaces',
-                [('config', l2_cfg), ('state', 'merged')],
+            task_list.append(Task(
+                name='Configure L2 interface properties (switchport)',
+                module='cisco.ios.ios_l2_interfaces',
+                params=[('config', l2_cfg), ('state', 'merged')],
             ))
 
         if l3_cfg:
-            tasks.extend(emit_task(
-                'Configure L3 interface addressing',
-                'cisco.ios.ios_l3_interfaces',
-                [('config', l3_cfg), ('state', 'merged')],
+            task_list.append(Task(
+                name='Configure L3 interface addressing',
+                module='cisco.ios.ios_l3_interfaces',
+                params=[('config', l3_cfg), ('state', 'merged')],
             ))
 
         # Residual interface lines that the structured modules don't cover
@@ -448,10 +472,10 @@ def build_playbook(blocks: list[tuple[str, int, list[tuple[str, int]]]],
                 residue.insert(0, f"vrf forwarding {ifc['vrf']}")
             if not residue:
                 continue
-            tasks.extend(emit_task(
-                f"Apply remaining commands on interface {ifc['name']}",
-                'cisco.ios.ios_config',
-                [
+            task_list.append(Task(
+                name=f"Apply remaining commands on interface {ifc['name']}",
+                module='cisco.ios.ios_config',
+                params=[
                     ('parents', f"interface {ifc['name']}"),
                     ('lines', residue),
                 ],
@@ -476,38 +500,38 @@ def build_playbook(blocks: list[tuple[str, int, list[tuple[str, int]]]],
                 else:
                     entry['configured_password'] = u['value']
             aggregate.append(entry)
-        tasks.extend(emit_task(
-            'Configure local user accounts',
-            'cisco.ios.ios_user',
-            [('aggregate', aggregate), ('state', 'present')],
+        task_list.append(Task(
+            name='Configure local user accounts',
+            module='cisco.ios.ios_user',
+            params=[('aggregate', aggregate), ('state', 'present')],
         ))
 
     for kind, text in banners:
-        tasks.extend(emit_task(
-            f'Configure {kind} banner',
-            'cisco.ios.ios_banner',
-            [('banner', kind), ('text', text), ('state', 'present')],
+        task_list.append(Task(
+            name=f'Configure {kind} banner',
+            module='cisco.ios.ios_banner',
+            params=[('banner', kind), ('text', text), ('state', 'present')],
         ))
 
     if logging_lines:
-        tasks.extend(emit_task(
-            'Apply logging configuration',
-            'cisco.ios.ios_config',
-            [('lines', logging_lines)],
+        task_list.append(Task(
+            name='Apply logging configuration',
+            module='cisco.ios.ios_config',
+            params=[('lines', logging_lines)],
         ))
 
     if ntp_servers:
-        tasks.extend(emit_task(
-            'Configure NTP servers',
-            'cisco.ios.ios_config',
-            [('lines', [f'ntp server {s}' for s in ntp_servers])],
+        task_list.append(Task(
+            name='Configure NTP servers',
+            module='cisco.ios.ios_config',
+            params=[('lines', [f'ntp server {s}' for s in ntp_servers])],
         ))
 
     if globals_simple:
-        tasks.extend(emit_task(
-            'Apply global configuration',
-            'cisco.ios.ios_config',
-            [('lines', globals_simple)],
+        task_list.append(Task(
+            name='Apply global configuration',
+            module='cisco.ios.ios_config',
+            params=[('lines', globals_simple)],
         ))
 
     # Remaining raw blocks: one task each so the playbook stays readable.
@@ -517,13 +541,17 @@ def build_playbook(blocks: list[tuple[str, int, list[tuple[str, int]]]],
         if not cleaned:
             continue
         nice = header if len(header) <= 60 else header[:57] + '...'
-        tasks.extend(emit_task(
-            f'Apply block: {nice}',
-            'cisco.ios.ios_config',
-            [('parents', header), ('lines', cleaned)],
+        task_list.append(Task(
+            name=f'Apply block: {nice}',
+            module='cisco.ios.ios_config',
+            params=[('parents', header), ('lines', cleaned)],
         ))
 
-    return '\n'.join(hdr + tasks) + '\n'
+    rendered: list[str] = list(hdr)
+    for t in task_list:
+        rendered.extend(render_task(t))
+        rendered.append('')  # blank line between tasks
+    return '\n'.join(rendered) + '\n'
 
 
 # ---------------------------------------------------------------------------
