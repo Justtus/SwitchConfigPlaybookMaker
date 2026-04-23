@@ -58,7 +58,13 @@ def extract_banners(lines: list[str]) -> tuple[list[tuple[str, str]], list[str]]
 
 
 def parse_blocks(lines: Iterable[str]) -> list[tuple[str, int, list[tuple[str, int]]]]:
-    """Split config into (header, header_lineno, [(child, child_lineno)]) blocks."""
+    """Split config into (header, header_lineno, [(child, child_lineno)]) blocks.
+
+    A block is introduced by a line starting in column 0 and continues while
+    following lines are indented. Blank lines and bang-comment lines ('!') end
+    the current block. Children are stripped of leading whitespace but keep
+    internal spacing. Line numbers are 1-indexed source positions.
+    """
     blocks: list[tuple[str, int, list[tuple[str, int]]]] = []
     current: tuple[str, int, list[tuple[str, int]]] | None = None
     for idx, raw in enumerate(lines, start=1):
@@ -252,7 +258,7 @@ def _emit_param(key: str, value, prefix: str) -> list[str]:
 # Playbook builder
 # ---------------------------------------------------------------------------
 
-def build_playbook(blocks: list[tuple[str, list[str]]],
+def build_playbook(blocks: list[tuple[str, int, list[tuple[str, int]]]],
                    banners: list[tuple[str, str]],
                    host: str,
                    source_file: str) -> str:
