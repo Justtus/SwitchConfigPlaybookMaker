@@ -279,9 +279,6 @@ def render_task(task: Task, indent: int = 4) -> list[str]:
 # Block classifier and typed-bucket parser
 # ---------------------------------------------------------------------------
 
-# Ordered list of (predicate, bucket_name). First match wins.
-_CLASSIFIERS: list[tuple[str, object]] = []
-
 
 def classify_block(header: str) -> str:
     """Return the bucket name for a block header."""
@@ -441,14 +438,21 @@ def parse_config(text: str) -> ParsedConfig:
             cfg.interfaces.append(parse_interface(header, children))
             continue
         if bucket == "user":
-            if not children:  # one-liner
+            # Cisco `username` commands are always one-liners (no indented children).
+            # If we ever see children here, the input is malformed — route to
+            # misc_blocks rather than silently discarding.
+            if not children:
                 u = parse_username(header)
                 if u is not None:
                     cfg.users.append(u)
+            else:
+                cfg.misc_blocks.append((header, header_ln, children_with_ln))
             continue
         if bucket == "ntp":
             if header.startswith("ntp server "):
-                cfg.ntp_servers.append(header.split(None, 2)[2].strip())
+                parts = header.split(None, 2)
+                if len(parts) >= 3:
+                    cfg.ntp_servers.append(parts[2].strip())
             continue
         if header in ("end", "!"):
             continue
