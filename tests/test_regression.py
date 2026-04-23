@@ -1,9 +1,12 @@
 """Golden-file regression: cisco_to_ansible produces byte-identical YAML."""
 from __future__ import annotations
 
+import difflib
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).parent.parent
@@ -23,4 +26,13 @@ def test_baseline_matches_fixture(tmp_path):
     assert result.returncode == 0, f"tool failed: {result.stderr}"
     actual = out.read_text(encoding="utf-8")
     expected = FIXTURE_OUT.read_text(encoding="utf-8")
-    assert actual == expected, "Generated YAML diverged from baseline fixture"
+    if actual != expected:
+        diff = list(difflib.unified_diff(
+            expected.splitlines(),
+            actual.splitlines(),
+            fromfile="baseline",
+            tofile="generated",
+            n=3,
+        ))
+        excerpt = "\n".join(diff[:40])
+        pytest.fail(f"Generated YAML diverged from baseline fixture:\n{excerpt}")
