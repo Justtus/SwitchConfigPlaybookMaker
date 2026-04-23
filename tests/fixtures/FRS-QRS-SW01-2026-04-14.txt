@@ -1,0 +1,697 @@
+no service pad
+service timestamps debug datetime msec localtime show-timezone
+service timestamps log datetime msec localtime show-timezone year
+service password-encryption
+no platform punt-keepalive disable-kernel-core
+platform management port rate-limt-enabled
+!
+hostname FRS-QRS-SW01
+!
+!
+vrf definition Mgmt-vrf
+ !
+ address-family ipv4
+ exit-address-family
+ !
+ address-family ipv6
+ exit-address-family
+!
+logging buffered 40960
+!
+vlan 1 name   default
+vlan 2 name     Gateway_VLAN
+vlan 10 name    Workstation_VLAN
+vlan 20 name    Voice_VLAN
+vlan 200 name   MGMT_VLAN
+vlan 300 name   Wireless_VLAN
+vlan 350 name   Guest_VLAN
+vlan 400 name   Facilities_VLAN
+!
+aaa new-model
+!
+!
+aaa authentication login default local
+aaa authorization exec default local 
+!
+!
+aaa session-id common
+clock timezone pst -8 0
+clock summer-time pdt recurring
+!
+!
+!
+!
+ip routing
+!
+!
+!
+!
+!
+ip name-server 10.137.2.10 10.137.2.11 10.191.8.6 10.191.8.7
+ip domain name quinn.com
+ip dhcp excluded-address 10.134.11.1 10.134.11.20
+ip dhcp excluded-address 10.134.11.245 10.134.11.255
+ip dhcp excluded-address 10.134.11.129 10.134.11.139
+ip dhcp excluded-address 10.134.11.118 10.134.11.127
+ip dhcp excluded-address 10.134.11.129 10.134.11.145
+ip dhcp excluded-address 10.134.57.1 10.134.57.9
+!
+ip dhcp pool Voice_VLAN
+ network 10.134.11.128 255.255.255.128
+ domain-name quinn.com
+ option 128 ip 10.134.17.5 
+ option 129 ip 10.134.17.5 
+ option 130 ascii "MITEL IP PHONE"
+ option 125 ascii "id:ipphone.mitel.com;sw_tftp=10.134.17.5;call_srv=10.134.17.5;vlan=20;dscp=46;l2p=6;"
+ option 134 hex 2e
+ default-router 10.134.11.129 
+ option 132 hex 14
+ option 133 hex 06
+ dns-server 10.137.2.10 10.137.2.11 10.191.8.6 10.191.8.7 
+!
+ip dhcp pool Management_VLAN
+ network 10.134.1.112 255.255.255.248
+ domain-name quinn.com
+ default-router 10.134.1.113 
+ dns-server 10.137.2.10 10.137.2.11 10.191.8.6 10.191.8.7 
+!
+ip dhcp pool Data_VLAN
+ network 10.134.11.0 255.255.255.128
+ default-router 10.134.11.1 
+ domain-name quinn.com
+ dns-server 10.137.2.10 10.137.2.11 10.191.8.6 10.191.8.7 
+!
+ip dhcp pool FRSQRS02
+ host 10.134.11.20 255.255.255.128
+ hardware-address 0800.37ee.43f0
+!
+ip dhcp pool FRSQRS03
+ host 10.134.11.16 255.255.255.128
+ client-identifier 0174.dfbf.1302.d1
+!
+ip dhcp pool FRSQRS04
+ host 10.134.11.60 255.255.255.128
+ hardware-address 0020.00a6.24e9
+!
+ip dhcp pool FRSQRS05
+ client-identifier 0100.2000.a624.e9
+!
+ip dhcp pool Voice
+!
+ip dhcp pool Wireless_VLAN
+ network 10.134.57.0 255.255.255.128
+ domain-name quinn.com
+ default-router 10.134.57.1 
+ dns-server 10.137.2.10 10.137.2.11 10.191.8.6 10.191.8.7 
+!
+ip dhcp pool Facilities_VLAN
+ network 10.134.57.128 255.255.255.128
+ domain-name quinn.com
+ dns-server 10.137.2.10 10.137.2.11 
+ default-router 10.134.57.129 
+!
+ip dhcp pool FRSQRS01
+ host 10.134.11.65 255.255.255.128
+ client-identifier 01e0.73e7.218e.1a
+!
+ip dhcp pool FRSQRS06
+ host 10.134.11.38 255.255.255.128
+ client-identifier 0138.ca84.3181.6f
+!
+!
+!
+login on-success log
+!
+!
+!
+!
+!
+!
+!
+no device-tracking logging theft
+!
+flow record WUG-In
+ match ipv4 tos
+ match ipv4 protocol
+ match ipv4 source address
+ match ipv4 destination address
+ match transport source-port
+ match transport destination-port
+ match interface input
+ collect interface output
+ collect transport tcp flags
+ collect counter bytes long
+ collect counter packets long
+!
+!
+flow record WUG-Out
+ match ipv4 tos
+ match ipv4 protocol
+ match ipv4 source address
+ match ipv4 destination address
+ match transport source-port
+ match transport destination-port
+ match interface output
+ collect transport tcp flags
+ collect counter bytes long
+ collect counter packets long
+!
+!
+flow exporter WUG
+ destination 10.137.2.74
+ transport udp 7777
+ template data timeout 60
+!
+!
+flow monitor WUG-In
+ exporter WUG
+ cache timeout active 60
+ record WUG-In
+!
+!
+flow monitor WUG-Out
+ exporter WUG
+ cache timeout active 60
+ record WUG-Out
+!
+!
+!
+!
+!
+!
+diagnostic bootup level minimal
+!
+spanning-tree mode rapid-pvst
+spanning-tree extend system-id
+archive
+ path ftp://COI-SRVR34.quinn.com/FRS/$h.txt
+ write-memory
+memory free low-watermark processor 79468
+!
+username quinn privilege 15 secret 9 $14$0IeG$qD8u2WM/mRQcf.$/69zVNZNiT.kJADZ.b6W3F0.Msn1HrVpmr0XZs/nDuo
+username cdw privilege 15 secret Quinn24615
+!
+redundancy
+ mode sso
+!
+!
+!
+!
+!
+transceiver type all
+ monitoring
+!
+!
+!
+!
+interface GigabitEthernet0/0
+ vrf forwarding Mgmt-vrf
+ no ip address
+ negotiation auto
+!
+interface GigabitEthernet1/0/1
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/2
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/3
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/4
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/5
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/6
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/7
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/8
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/9
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/10
+ description Salient Server
+ switchport access vlan 400
+ ip flow monitor WUG-In input
+ ip flow monitor WUG-Out output
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/11
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/12
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/13
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/14
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/15
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/16
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/17
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/18
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/19
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/20
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/21
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/22
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/23
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/24
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/25
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/26
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/27
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/28
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/29
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/30
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/31
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/32
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/33
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/34
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/35
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/36
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/37
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/38
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/39
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/40
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/41
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/42
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/43
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/44
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/45
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/46
+ description WAP
+ switchport trunk native vlan 200
+ switchport trunk allowed vlan 200,300
+ switchport mode trunk
+ ip flow monitor WUG-In input
+ ip flow monitor WUG-Out output
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/47
+ switchport access vlan 10
+ switchport voice vlan 20
+ auto qos trust dscp
+ spanning-tree portfast
+!
+interface GigabitEthernet1/0/48
+ description Uplink to TPX
+ switchport access vlan 2
+ ip flow monitor WUG-In input
+ ip flow monitor WUG-Out output
+ auto qos trust dscp
+!
+interface GigabitEthernet1/1/1
+ shutdown
+!
+interface GigabitEthernet1/1/2
+ shutdown
+!
+interface GigabitEthernet1/1/3
+ shutdown
+!
+interface GigabitEthernet1/1/4
+ shutdown
+!
+interface TenGigabitEthernet1/1/1
+ shutdown
+!
+interface TenGigabitEthernet1/1/2
+ shutdown
+!
+interface TenGigabitEthernet1/1/3
+ shutdown
+!
+interface TenGigabitEthernet1/1/4
+ shutdown
+!
+interface Vlan1
+ ip address 10.191.28.1 255.255.255.0
+ shutdown
+!
+interface Vlan2
+ ip address 10.134.0.25 255.255.255.248
+!
+interface Vlan10
+ description FRS_QRS_LAN
+ ip address 10.134.11.1 255.255.255.128
+!
+interface Vlan20
+ description FRS_QRS_VOICE
+ ip address 10.134.11.129 255.255.255.128
+!
+interface Vlan200
+ ip address 10.134.1.113 255.255.255.248
+!
+interface Vlan300
+ ip address 10.134.57.1 255.255.255.128
+!
+interface Vlan400
+ ip address 10.134.57.129 255.255.255.128
+!
+router bgp 64610
+ bgp router-id 10.134.0.25
+ bgp log-neighbor-changes
+ neighbor 10.134.0.26 remote-as 65001
+ neighbor 10.134.0.26 description TPX
+ !
+ address-family ipv4
+  redistribute connected
+  neighbor 10.134.0.26 activate
+  neighbor 10.134.0.26 route-map TPX-INGRESS-IN in
+  neighbor 10.134.0.26 route-map TPX-EGRESS-OUT out
+ exit-address-family
+!
+ip forward-protocol nd
+no ip http server
+ip http authentication aaa
+no ip http secure-server
+ip ftp username QUINN\CiscoBackup
+ip ftp password 7 097E1D0D2E5547164A4D45
+!
+!
+ip access-list standard TPX-EGRESS-OUT
+ 10 permit any
+ip access-list standard TPX-INGRESS-IN
+ 10 permit any
+!
+ip access-list extended AutoQos-4.0-wlan-Acl-Bulk-Data
+ 10 permit tcp any any eq 22
+ 20 permit tcp any any eq 465
+ 30 permit tcp any any eq 143
+ 40 permit tcp any any eq 993
+ 50 permit tcp any any eq 995
+ 60 permit tcp any any eq 1914
+ 70 permit tcp any any eq ftp
+ 80 permit tcp any any eq ftp-data
+ 90 permit tcp any any eq smtp
+ 100 permit tcp any any eq pop3
+ip access-list extended AutoQos-4.0-wlan-Acl-MultiEnhanced-Conf
+ 10 permit udp any any range 16384 32767
+ 20 permit tcp any any range 50000 59999
+ip access-list extended AutoQos-4.0-wlan-Acl-Scavanger
+ 10 permit tcp any any range 2300 2400
+ 20 permit udp any any range 2300 2400
+ 30 permit tcp any any range 6881 6999
+ 40 permit tcp any any range 28800 29100
+ 50 permit tcp any any eq 1214
+ 60 permit udp any any eq 1214
+ 70 permit tcp any any eq 3689
+ 80 permit udp any any eq 3689
+ 90 permit tcp any any eq 11999
+ip access-list extended AutoQos-4.0-wlan-Acl-Signaling
+ 10 permit tcp any any range 2000 2002
+ 20 permit tcp any any range 5060 5061
+ 30 permit udp any any range 5060 5061
+ip access-list extended AutoQos-4.0-wlan-Acl-Transactional-Data
+ 10 permit tcp any any eq 443
+ 20 permit tcp any any eq 1521
+ 30 permit udp any any eq 1521
+ 40 permit tcp any any eq 1526
+ 50 permit udp any any eq 1526
+ 60 permit tcp any any eq 1575
+ 70 permit udp any any eq 1575
+ 80 permit tcp any any eq 1630
+ 90 permit udp any any eq 1630
+ 100 permit tcp any any eq 1527
+ 110 permit tcp any any eq 6200
+ 120 permit tcp any any eq 3389
+ 130 permit tcp any any eq 5985
+ 140 permit tcp any any eq 8080
+!
+ip radius source-interface Vlan200 
+logging source-interface Vlan200
+logging host 10.137.2.74
+!
+route-map TPX-EGRESS-OUT permit 10 
+ match ip address TPX-EGRESS-OUT
+!
+route-map TPX-INGRESS-IN permit 10 
+ match ip address TPX-INGRESS-IN
+!
+!
+snmp-server view NO_BAD_SNMP iso included
+snmp-server view NO_BAD_SNMP snmpUsmMIB excluded
+snmp-server view NO_BAD_SNMP snmpVacmMIB excluded
+snmp-server view NO_BAD_SNMP snmpCommunityMIB excluded
+snmp-server community qu1nngr0up view NO_BAD_SNMP RO
+!
+!
+radius server FRS-SRVR05
+ address ipv4 10.134.25.41 auth-port 1812 acct-port 1813
+ key 7 115113004436332E370731
+!
+radius server COI-SRVR47
+ address ipv4 10.137.2.105 auth-port 1812 acct-port 1813
+ key 7 05530C0A7268762B2A280D
+!
+radius server RIV-SRVR18
+ address ipv4 10.191.8.62 auth-port 1812 acct-port 1813
+ key 7 014B0C01082F3E2D126154
+!
+!
+control-plane
+ service-policy input system-cpp-policy
+!
+banner login ^C
+NOTICE TO USERS
+THIS IS A PRIVATE COMPUTER SYSTEM. It is for authorized use only.
+Users (authorized or unauthorized) have no explicit or implicit
+expectation of privacy.
+Any or all uses of this system and all files on this system may
+be intercepted, monitored, recorded, copied, audited, inspected,
+and disclosed to authorized site and law enforcement personnel,
+as well as authorized officials of other agencies, both domestic
+and foreign.  By using this system, the user consents to such
+interception, monitoring, recording, copying, auditing, inspection,
+and disclosure at the discretion of authorized site personnel.
+Unauthorized or improper use of this system may result in
+administrative disciplinary action and civil and criminal penalties.
+By continuing to use this system you indicate your awareness of and
+consent to these terms and conditions of use.   LOG OFF IMMEDIATELY
+if you do not agree to the conditions stated in this warning.
+^C
+!
+line con 0
+ stopbits 1
+line aux 0
+ stopbits 1
+line vty 0 4
+ transport input ssh
+ transport output ssh
+line vty 5 15
+ transport input ssh
+ transport output ssh
+!
+ntp server ntp.quinn.com
+ntp server ntp2.quinn.com
+!
+!
+!
+!
+!
+!
+end

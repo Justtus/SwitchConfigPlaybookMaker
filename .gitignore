@@ -2,7 +2,7 @@
 .claude/
 
 # Generated playbook artifacts — regenerate from source config files
-FRS-QRS-SW01-*.yml
+/FRS-QRS-SW01-*.yml
 
 # Python
 __pycache__/
