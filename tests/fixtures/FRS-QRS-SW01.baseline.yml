@@ -24,6 +24,83 @@
             - "10.191.8.7"
         state: merged
 
+    - name: "Apply base services and global settings"
+      cisco.ios.ios_config:
+        lines:
+          - "no service pad"
+          - "service timestamps debug datetime msec localtime show-timezone"
+          - "service timestamps log datetime msec localtime show-timezone year"
+          - "service password-encryption"
+          - "no platform punt-keepalive disable-kernel-core"
+          - "platform management port rate-limt-enabled"
+          - "clock timezone pst -8 0"
+          - "clock summer-time pdt recurring"
+          - "login on-success log"
+          - "no device-tracking logging theft"
+          - "diagnostic bootup level minimal"
+          - "memory free low-watermark processor 79468"
+
+    - name: "Configure local user accounts"
+      cisco.ios.ios_user:
+        aggregate:
+          - name: quinn
+            privilege: 15
+            hashed_password:
+              type: 9
+              value: "$14$0IeG$qD8u2WM/mRQcf.$/69zVNZNiT.kJADZ.b6W3F0.Msn1HrVpmr0XZs/nDuo"
+          - name: cdw
+            privilege: 15
+            configured_password: Quinn24615
+        state: present
+
+    - name: "Enable AAA new-model"
+      cisco.ios.ios_config:
+        lines:
+          - "aaa new-model"
+          - "aaa session-id common"
+
+    - name: "Apply block: radius server FRS-SRVR05"
+      cisco.ios.ios_config:
+        parents: "radius server FRS-SRVR05"
+        lines:
+          - "address ipv4 10.134.25.41 auth-port 1812 acct-port 1813"
+          - "key 7 115113004436332E370731"
+
+    - name: "Apply block: radius server COI-SRVR47"
+      cisco.ios.ios_config:
+        parents: "radius server COI-SRVR47"
+        lines:
+          - "address ipv4 10.137.2.105 auth-port 1812 acct-port 1813"
+          - "key 7 05530C0A7268762B2A280D"
+
+    - name: "Apply block: radius server RIV-SRVR18"
+      cisco.ios.ios_config:
+        parents: "radius server RIV-SRVR18"
+        lines:
+          - "address ipv4 10.191.8.62 auth-port 1812 acct-port 1813"
+          - "key 7 014B0C01082F3E2D126154"
+
+    - name: "Apply AAA authentication and authorization"
+      cisco.ios.ios_config:
+        lines:
+          - "aaa authentication login default local"
+          - "aaa authorization exec default local"
+
+    - name: "Enable IP routing and forwarding"
+      cisco.ios.ios_config:
+        lines:
+          - "ip routing"
+          - "ip forward-protocol nd"
+
+    - name: "Apply block: vrf definition Mgmt-vrf"
+      cisco.ios.ios_config:
+        parents: "vrf definition Mgmt-vrf"
+        lines:
+          - "address-family ipv4"
+          - exit-address-family
+          - "address-family ipv6"
+          - exit-address-family
+
     - name: "Configure VLAN database"
       cisco.ios.ios_vlans:
         config:
@@ -44,6 +121,271 @@
           - vlan_id: 400
             name: Facilities_VLAN
         state: merged
+
+    - name: "Configure spanning-tree mode (before ports come up)"
+      cisco.ios.ios_config:
+        lines:
+          - "spanning-tree mode rapid-pvst"
+          - "spanning-tree extend system-id"
+
+    - name: "Apply block: ip access-list standard TPX-EGRESS-OUT"
+      cisco.ios.ios_config:
+        parents: "ip access-list standard TPX-EGRESS-OUT"
+        lines:
+          - "10 permit any"
+
+    - name: "Apply block: ip access-list standard TPX-INGRESS-IN"
+      cisco.ios.ios_config:
+        parents: "ip access-list standard TPX-INGRESS-IN"
+        lines:
+          - "10 permit any"
+
+    - name: "Apply block: ip access-list extended AutoQos-4.0-wlan-Acl-Bulk-Data"
+      cisco.ios.ios_config:
+        parents: "ip access-list extended AutoQos-4.0-wlan-Acl-Bulk-Data"
+        lines:
+          - "10 permit tcp any any eq 22"
+          - "20 permit tcp any any eq 465"
+          - "30 permit tcp any any eq 143"
+          - "40 permit tcp any any eq 993"
+          - "50 permit tcp any any eq 995"
+          - "60 permit tcp any any eq 1914"
+          - "70 permit tcp any any eq ftp"
+          - "80 permit tcp any any eq ftp-data"
+          - "90 permit tcp any any eq smtp"
+          - "100 permit tcp any any eq pop3"
+
+    - name: "Apply block: ip access-list extended AutoQos-4.0-wlan-Acl-MultiEnhance..."
+      cisco.ios.ios_config:
+        parents: "ip access-list extended AutoQos-4.0-wlan-Acl-MultiEnhanced-Conf"
+        lines:
+          - "10 permit udp any any range 16384 32767"
+          - "20 permit tcp any any range 50000 59999"
+
+    - name: "Apply block: ip access-list extended AutoQos-4.0-wlan-Acl-Scavanger"
+      cisco.ios.ios_config:
+        parents: "ip access-list extended AutoQos-4.0-wlan-Acl-Scavanger"
+        lines:
+          - "10 permit tcp any any range 2300 2400"
+          - "20 permit udp any any range 2300 2400"
+          - "30 permit tcp any any range 6881 6999"
+          - "40 permit tcp any any range 28800 29100"
+          - "50 permit tcp any any eq 1214"
+          - "60 permit udp any any eq 1214"
+          - "70 permit tcp any any eq 3689"
+          - "80 permit udp any any eq 3689"
+          - "90 permit tcp any any eq 11999"
+
+    - name: "Apply block: ip access-list extended AutoQos-4.0-wlan-Acl-Signaling"
+      cisco.ios.ios_config:
+        parents: "ip access-list extended AutoQos-4.0-wlan-Acl-Signaling"
+        lines:
+          - "10 permit tcp any any range 2000 2002"
+          - "20 permit tcp any any range 5060 5061"
+          - "30 permit udp any any range 5060 5061"
+
+    - name: "Apply block: ip access-list extended AutoQos-4.0-wlan-Acl-Transactiona..."
+      cisco.ios.ios_config:
+        parents: "ip access-list extended AutoQos-4.0-wlan-Acl-Transactional-Data"
+        lines:
+          - "10 permit tcp any any eq 443"
+          - "20 permit tcp any any eq 1521"
+          - "30 permit udp any any eq 1521"
+          - "40 permit tcp any any eq 1526"
+          - "50 permit udp any any eq 1526"
+          - "60 permit tcp any any eq 1575"
+          - "70 permit udp any any eq 1575"
+          - "80 permit tcp any any eq 1630"
+          - "90 permit udp any any eq 1630"
+          - "100 permit tcp any any eq 1527"
+          - "110 permit tcp any any eq 6200"
+          - "120 permit tcp any any eq 3389"
+          - "130 permit tcp any any eq 5985"
+          - "140 permit tcp any any eq 8080"
+
+    - name: "Apply block: route-map TPX-EGRESS-OUT permit 10"
+      cisco.ios.ios_config:
+        parents: "route-map TPX-EGRESS-OUT permit 10"
+        lines:
+          - "match ip address TPX-EGRESS-OUT"
+
+    - name: "Apply block: route-map TPX-INGRESS-IN permit 10"
+      cisco.ios.ios_config:
+        parents: "route-map TPX-INGRESS-IN permit 10"
+        lines:
+          - "match ip address TPX-INGRESS-IN"
+
+    - name: "Apply block: flow record WUG-In"
+      cisco.ios.ios_config:
+        parents: "flow record WUG-In"
+        lines:
+          - "match ipv4 tos"
+          - "match ipv4 protocol"
+          - "match ipv4 source address"
+          - "match ipv4 destination address"
+          - "match transport source-port"
+          - "match transport destination-port"
+          - "match interface input"
+          - "collect interface output"
+          - "collect transport tcp flags"
+          - "collect counter bytes long"
+          - "collect counter packets long"
+
+    - name: "Apply block: flow record WUG-Out"
+      cisco.ios.ios_config:
+        parents: "flow record WUG-Out"
+        lines:
+          - "match ipv4 tos"
+          - "match ipv4 protocol"
+          - "match ipv4 source address"
+          - "match ipv4 destination address"
+          - "match transport source-port"
+          - "match transport destination-port"
+          - "match interface output"
+          - "collect transport tcp flags"
+          - "collect counter bytes long"
+          - "collect counter packets long"
+
+    - name: "Apply block: flow exporter WUG"
+      cisco.ios.ios_config:
+        parents: "flow exporter WUG"
+        lines:
+          - "destination 10.137.2.74"
+          - "transport udp 7777"
+          - "template data timeout 60"
+
+    - name: "Apply block: flow monitor WUG-In"
+      cisco.ios.ios_config:
+        parents: "flow monitor WUG-In"
+        lines:
+          - "exporter WUG"
+          - "cache timeout active 60"
+          - "record WUG-In"
+
+    - name: "Apply block: flow monitor WUG-Out"
+      cisco.ios.ios_config:
+        parents: "flow monitor WUG-Out"
+        lines:
+          - "exporter WUG"
+          - "cache timeout active 60"
+          - "record WUG-Out"
+
+    - name: "Configure SNMP views and community strings"
+      cisco.ios.ios_config:
+        lines:
+          - "snmp-server view NO_BAD_SNMP iso included"
+          - "snmp-server view NO_BAD_SNMP snmpUsmMIB excluded"
+          - "snmp-server view NO_BAD_SNMP snmpVacmMIB excluded"
+          - "snmp-server view NO_BAD_SNMP snmpCommunityMIB excluded"
+          - "snmp-server community qu1nngr0up view NO_BAD_SNMP RO"
+
+    - name: "Configure DHCP excluded addresses"
+      cisco.ios.ios_config:
+        lines:
+          - "ip dhcp excluded-address 10.134.11.1 10.134.11.20"
+          - "ip dhcp excluded-address 10.134.11.245 10.134.11.255"
+          - "ip dhcp excluded-address 10.134.11.129 10.134.11.139"
+          - "ip dhcp excluded-address 10.134.11.118 10.134.11.127"
+          - "ip dhcp excluded-address 10.134.11.129 10.134.11.145"
+          - "ip dhcp excluded-address 10.134.57.1 10.134.57.9"
+
+    - name: "Apply block: ip dhcp pool Voice_VLAN"
+      cisco.ios.ios_config:
+        parents: "ip dhcp pool Voice_VLAN"
+        lines:
+          - "network 10.134.11.128 255.255.255.128"
+          - "domain-name quinn.com"
+          - "option 128 ip 10.134.17.5"
+          - "option 129 ip 10.134.17.5"
+          - "option 130 ascii \"MITEL IP PHONE\""
+          - "option 125 ascii \"id:ipphone.mitel.com;sw_tftp=10.134.17.5;call_srv=10.134.17.5;vlan=20;dscp=46;l2p=6;\""
+          - "option 134 hex 2e"
+          - "default-router 10.134.11.129"
+          - "option 132 hex 14"
+          - "option 133 hex 06"
+          - "dns-server 10.137.2.10 10.137.2.11 10.191.8.6 10.191.8.7"
+
+    - name: "Apply block: ip dhcp pool Management_VLAN"
+      cisco.ios.ios_config:
+        parents: "ip dhcp pool Management_VLAN"
+        lines:
+          - "network 10.134.1.112 255.255.255.248"
+          - "domain-name quinn.com"
+          - "default-router 10.134.1.113"
+          - "dns-server 10.137.2.10 10.137.2.11 10.191.8.6 10.191.8.7"
+
+    - name: "Apply block: ip dhcp pool Data_VLAN"
+      cisco.ios.ios_config:
+        parents: "ip dhcp pool Data_VLAN"
+        lines:
+          - "network 10.134.11.0 255.255.255.128"
+          - "default-router 10.134.11.1"
+          - "domain-name quinn.com"
+          - "dns-server 10.137.2.10 10.137.2.11 10.191.8.6 10.191.8.7"
+
+    - name: "Apply block: ip dhcp pool FRSQRS02"
+      cisco.ios.ios_config:
+        parents: "ip dhcp pool FRSQRS02"
+        lines:
+          - "host 10.134.11.20 255.255.255.128"
+          - "hardware-address 0800.37ee.43f0"
+
+    - name: "Apply block: ip dhcp pool FRSQRS03"
+      cisco.ios.ios_config:
+        parents: "ip dhcp pool FRSQRS03"
+        lines:
+          - "host 10.134.11.16 255.255.255.128"
+          - "client-identifier 0174.dfbf.1302.d1"
+
+    - name: "Apply block: ip dhcp pool FRSQRS04"
+      cisco.ios.ios_config:
+        parents: "ip dhcp pool FRSQRS04"
+        lines:
+          - "host 10.134.11.60 255.255.255.128"
+          - "hardware-address 0020.00a6.24e9"
+
+    - name: "Apply block: ip dhcp pool FRSQRS05"
+      cisco.ios.ios_config:
+        parents: "ip dhcp pool FRSQRS05"
+        lines:
+          - "client-identifier 0100.2000.a624.e9"
+
+    - name: "Apply block: ip dhcp pool Voice"
+      cisco.ios.ios_config:
+        lines:
+          - "ip dhcp pool Voice"
+
+    - name: "Apply block: ip dhcp pool Wireless_VLAN"
+      cisco.ios.ios_config:
+        parents: "ip dhcp pool Wireless_VLAN"
+        lines:
+          - "network 10.134.57.0 255.255.255.128"
+          - "domain-name quinn.com"
+          - "default-router 10.134.57.1"
+          - "dns-server 10.137.2.10 10.137.2.11 10.191.8.6 10.191.8.7"
+
+    - name: "Apply block: ip dhcp pool Facilities_VLAN"
+      cisco.ios.ios_config:
+        parents: "ip dhcp pool Facilities_VLAN"
+        lines:
+          - "network 10.134.57.128 255.255.255.128"
+          - "domain-name quinn.com"
+          - "dns-server 10.137.2.10 10.137.2.11"
+          - "default-router 10.134.57.129"
+
+    - name: "Apply block: ip dhcp pool FRSQRS01"
+      cisco.ios.ios_config:
+        parents: "ip dhcp pool FRSQRS01"
+        lines:
+          - "host 10.134.11.65 255.255.255.128"
+          - "client-identifier 01e0.73e7.218e.1a"
+
+    - name: "Apply block: ip dhcp pool FRSQRS06"
+      cisco.ios.ios_config:
+        parents: "ip dhcp pool FRSQRS06"
+        lines:
+          - "host 10.134.11.38 255.255.255.128"
+          - "client-identifier 0138.ca84.3181.6f"
 
     - name: "Configure interface admin state and descriptions"
       cisco.ios.ios_interfaces:
@@ -845,18 +1187,47 @@
           - "ip flow monitor WUG-Out output"
           - "auto qos trust dscp"
 
-    - name: "Configure local user accounts"
-      cisco.ios.ios_user:
-        aggregate:
-          - name: quinn
-            privilege: 15
-            hashed_password:
-              type: 9
-              value: "$14$0IeG$qD8u2WM/mRQcf.$/69zVNZNiT.kJADZ.b6W3F0.Msn1HrVpmr0XZs/nDuo"
-          - name: cdw
-            privilege: 15
-            configured_password: Quinn24615
-        state: present
+    - name: "Apply block: router bgp 64610"
+      cisco.ios.ios_config:
+        parents: "router bgp 64610"
+        lines:
+          - "bgp router-id 10.134.0.25"
+          - "bgp log-neighbor-changes"
+          - "neighbor 10.134.0.26 remote-as 65001"
+          - "neighbor 10.134.0.26 description TPX"
+          - "address-family ipv4"
+          - "redistribute connected"
+          - "neighbor 10.134.0.26 activate"
+          - "neighbor 10.134.0.26 route-map TPX-INGRESS-IN in"
+          - "neighbor 10.134.0.26 route-map TPX-EGRESS-OUT out"
+          - exit-address-family
+
+    - name: "Configure source-interface globals"
+      cisco.ios.ios_config:
+        lines:
+          - "ip radius source-interface Vlan200"
+          - "logging source-interface Vlan200"
+
+    - name: "Apply logging configuration"
+      cisco.ios.ios_config:
+        lines:
+          - "logging buffered 40960"
+          - "logging host 10.137.2.74"
+
+    - name: "Configure NTP servers"
+      cisco.ios.ios_config:
+        lines:
+          - "ntp server ntp.quinn.com"
+          - "ntp server ntp2.quinn.com"
+
+    - name: "Configure IP services (ftp, http)"
+      cisco.ios.ios_config:
+        lines:
+          - "no ip http server"
+          - "ip http authentication aaa"
+          - "no ip http secure-server"
+          - "ip ftp username QUINN\\CiscoBackup"
+          - "ip ftp password 7 097E1D0D2E5547164A4D45"
 
     - name: "Configure login banner"
       cisco.ios.ios_banner:
@@ -879,366 +1250,6 @@
           consent to these terms and conditions of use.   LOG OFF IMMEDIATELY
           if you do not agree to the conditions stated in this warning.
         state: present
-
-    - name: "Apply logging configuration"
-      cisco.ios.ios_config:
-        lines:
-          - "logging buffered 40960"
-          - "logging source-interface Vlan200"
-          - "logging host 10.137.2.74"
-
-    - name: "Configure NTP servers"
-      cisco.ios.ios_config:
-        lines:
-          - "ntp server ntp.quinn.com"
-          - "ntp server ntp2.quinn.com"
-
-    - name: "Apply global configuration"
-      cisco.ios.ios_config:
-        lines:
-          - "no service pad"
-          - "service timestamps debug datetime msec localtime show-timezone"
-          - "service timestamps log datetime msec localtime show-timezone year"
-          - "service password-encryption"
-          - "no platform punt-keepalive disable-kernel-core"
-          - "platform management port rate-limt-enabled"
-          - "aaa new-model"
-          - "aaa authentication login default local"
-          - "aaa authorization exec default local"
-          - "aaa session-id common"
-          - "clock timezone pst -8 0"
-          - "clock summer-time pdt recurring"
-          - "ip routing"
-          - "ip dhcp excluded-address 10.134.11.1 10.134.11.20"
-          - "ip dhcp excluded-address 10.134.11.245 10.134.11.255"
-          - "ip dhcp excluded-address 10.134.11.129 10.134.11.139"
-          - "ip dhcp excluded-address 10.134.11.118 10.134.11.127"
-          - "ip dhcp excluded-address 10.134.11.129 10.134.11.145"
-          - "ip dhcp excluded-address 10.134.57.1 10.134.57.9"
-          - "ip dhcp pool Voice"
-          - "login on-success log"
-          - "no device-tracking logging theft"
-          - "diagnostic bootup level minimal"
-          - "spanning-tree mode rapid-pvst"
-          - "spanning-tree extend system-id"
-          - "memory free low-watermark processor 79468"
-          - "ip forward-protocol nd"
-          - "no ip http server"
-          - "ip http authentication aaa"
-          - "no ip http secure-server"
-          - "ip ftp username QUINN\\CiscoBackup"
-          - "ip ftp password 7 097E1D0D2E5547164A4D45"
-          - "ip radius source-interface Vlan200"
-          - "snmp-server view NO_BAD_SNMP iso included"
-          - "snmp-server view NO_BAD_SNMP snmpUsmMIB excluded"
-          - "snmp-server view NO_BAD_SNMP snmpVacmMIB excluded"
-          - "snmp-server view NO_BAD_SNMP snmpCommunityMIB excluded"
-          - "snmp-server community qu1nngr0up view NO_BAD_SNMP RO"
-
-    - name: "Apply block: vrf definition Mgmt-vrf"
-      cisco.ios.ios_config:
-        parents: "vrf definition Mgmt-vrf"
-        lines:
-          - "address-family ipv4"
-          - exit-address-family
-          - "address-family ipv6"
-          - exit-address-family
-
-    - name: "Apply block: ip dhcp pool Voice_VLAN"
-      cisco.ios.ios_config:
-        parents: "ip dhcp pool Voice_VLAN"
-        lines:
-          - "network 10.134.11.128 255.255.255.128"
-          - "domain-name quinn.com"
-          - "option 128 ip 10.134.17.5"
-          - "option 129 ip 10.134.17.5"
-          - "option 130 ascii \"MITEL IP PHONE\""
-          - "option 125 ascii \"id:ipphone.mitel.com;sw_tftp=10.134.17.5;call_srv=10.134.17.5;vlan=20;dscp=46;l2p=6;\""
-          - "option 134 hex 2e"
-          - "default-router 10.134.11.129"
-          - "option 132 hex 14"
-          - "option 133 hex 06"
-          - "dns-server 10.137.2.10 10.137.2.11 10.191.8.6 10.191.8.7"
-
-    - name: "Apply block: ip dhcp pool Management_VLAN"
-      cisco.ios.ios_config:
-        parents: "ip dhcp pool Management_VLAN"
-        lines:
-          - "network 10.134.1.112 255.255.255.248"
-          - "domain-name quinn.com"
-          - "default-router 10.134.1.113"
-          - "dns-server 10.137.2.10 10.137.2.11 10.191.8.6 10.191.8.7"
-
-    - name: "Apply block: ip dhcp pool Data_VLAN"
-      cisco.ios.ios_config:
-        parents: "ip dhcp pool Data_VLAN"
-        lines:
-          - "network 10.134.11.0 255.255.255.128"
-          - "default-router 10.134.11.1"
-          - "domain-name quinn.com"
-          - "dns-server 10.137.2.10 10.137.2.11 10.191.8.6 10.191.8.7"
-
-    - name: "Apply block: ip dhcp pool FRSQRS02"
-      cisco.ios.ios_config:
-        parents: "ip dhcp pool FRSQRS02"
-        lines:
-          - "host 10.134.11.20 255.255.255.128"
-          - "hardware-address 0800.37ee.43f0"
-
-    - name: "Apply block: ip dhcp pool FRSQRS03"
-      cisco.ios.ios_config:
-        parents: "ip dhcp pool FRSQRS03"
-        lines:
-          - "host 10.134.11.16 255.255.255.128"
-          - "client-identifier 0174.dfbf.1302.d1"
-
-    - name: "Apply block: ip dhcp pool FRSQRS04"
-      cisco.ios.ios_config:
-        parents: "ip dhcp pool FRSQRS04"
-        lines:
-          - "host 10.134.11.60 255.255.255.128"
-          - "hardware-address 0020.00a6.24e9"
-
-    - name: "Apply block: ip dhcp pool FRSQRS05"
-      cisco.ios.ios_config:
-        parents: "ip dhcp pool FRSQRS05"
-        lines:
-          - "client-identifier 0100.2000.a624.e9"
-
-    - name: "Apply block: ip dhcp pool Wireless_VLAN"
-      cisco.ios.ios_config:
-        parents: "ip dhcp pool Wireless_VLAN"
-        lines:
-          - "network 10.134.57.0 255.255.255.128"
-          - "domain-name quinn.com"
-          - "default-router 10.134.57.1"
-          - "dns-server 10.137.2.10 10.137.2.11 10.191.8.6 10.191.8.7"
-
-    - name: "Apply block: ip dhcp pool Facilities_VLAN"
-      cisco.ios.ios_config:
-        parents: "ip dhcp pool Facilities_VLAN"
-        lines:
-          - "network 10.134.57.128 255.255.255.128"
-          - "domain-name quinn.com"
-          - "dns-server 10.137.2.10 10.137.2.11"
-          - "default-router 10.134.57.129"
-
-    - name: "Apply block: ip dhcp pool FRSQRS01"
-      cisco.ios.ios_config:
-        parents: "ip dhcp pool FRSQRS01"
-        lines:
-          - "host 10.134.11.65 255.255.255.128"
-          - "client-identifier 01e0.73e7.218e.1a"
-
-    - name: "Apply block: ip dhcp pool FRSQRS06"
-      cisco.ios.ios_config:
-        parents: "ip dhcp pool FRSQRS06"
-        lines:
-          - "host 10.134.11.38 255.255.255.128"
-          - "client-identifier 0138.ca84.3181.6f"
-
-    - name: "Apply block: flow record WUG-In"
-      cisco.ios.ios_config:
-        parents: "flow record WUG-In"
-        lines:
-          - "match ipv4 tos"
-          - "match ipv4 protocol"
-          - "match ipv4 source address"
-          - "match ipv4 destination address"
-          - "match transport source-port"
-          - "match transport destination-port"
-          - "match interface input"
-          - "collect interface output"
-          - "collect transport tcp flags"
-          - "collect counter bytes long"
-          - "collect counter packets long"
-
-    - name: "Apply block: flow record WUG-Out"
-      cisco.ios.ios_config:
-        parents: "flow record WUG-Out"
-        lines:
-          - "match ipv4 tos"
-          - "match ipv4 protocol"
-          - "match ipv4 source address"
-          - "match ipv4 destination address"
-          - "match transport source-port"
-          - "match transport destination-port"
-          - "match interface output"
-          - "collect transport tcp flags"
-          - "collect counter bytes long"
-          - "collect counter packets long"
-
-    - name: "Apply block: flow exporter WUG"
-      cisco.ios.ios_config:
-        parents: "flow exporter WUG"
-        lines:
-          - "destination 10.137.2.74"
-          - "transport udp 7777"
-          - "template data timeout 60"
-
-    - name: "Apply block: flow monitor WUG-In"
-      cisco.ios.ios_config:
-        parents: "flow monitor WUG-In"
-        lines:
-          - "exporter WUG"
-          - "cache timeout active 60"
-          - "record WUG-In"
-
-    - name: "Apply block: flow monitor WUG-Out"
-      cisco.ios.ios_config:
-        parents: "flow monitor WUG-Out"
-        lines:
-          - "exporter WUG"
-          - "cache timeout active 60"
-          - "record WUG-Out"
-
-    - name: "Apply block: archive"
-      cisco.ios.ios_config:
-        parents: archive
-        lines:
-          - "path ftp://COI-SRVR34.quinn.com/FRS/$h.txt"
-          - write-memory
-
-    - name: "Apply block: redundancy"
-      cisco.ios.ios_config:
-        parents: redundancy
-        lines:
-          - "mode sso"
-
-    - name: "Apply block: transceiver type all"
-      cisco.ios.ios_config:
-        parents: "transceiver type all"
-        lines:
-          - monitoring
-
-    - name: "Apply block: router bgp 64610"
-      cisco.ios.ios_config:
-        parents: "router bgp 64610"
-        lines:
-          - "bgp router-id 10.134.0.25"
-          - "bgp log-neighbor-changes"
-          - "neighbor 10.134.0.26 remote-as 65001"
-          - "neighbor 10.134.0.26 description TPX"
-          - "address-family ipv4"
-          - "redistribute connected"
-          - "neighbor 10.134.0.26 activate"
-          - "neighbor 10.134.0.26 route-map TPX-INGRESS-IN in"
-          - "neighbor 10.134.0.26 route-map TPX-EGRESS-OUT out"
-          - exit-address-family
-
-    - name: "Apply block: ip access-list standard TPX-EGRESS-OUT"
-      cisco.ios.ios_config:
-        parents: "ip access-list standard TPX-EGRESS-OUT"
-        lines:
-          - "10 permit any"
-
-    - name: "Apply block: ip access-list standard TPX-INGRESS-IN"
-      cisco.ios.ios_config:
-        parents: "ip access-list standard TPX-INGRESS-IN"
-        lines:
-          - "10 permit any"
-
-    - name: "Apply block: ip access-list extended AutoQos-4.0-wlan-Acl-Bulk-Data"
-      cisco.ios.ios_config:
-        parents: "ip access-list extended AutoQos-4.0-wlan-Acl-Bulk-Data"
-        lines:
-          - "10 permit tcp any any eq 22"
-          - "20 permit tcp any any eq 465"
-          - "30 permit tcp any any eq 143"
-          - "40 permit tcp any any eq 993"
-          - "50 permit tcp any any eq 995"
-          - "60 permit tcp any any eq 1914"
-          - "70 permit tcp any any eq ftp"
-          - "80 permit tcp any any eq ftp-data"
-          - "90 permit tcp any any eq smtp"
-          - "100 permit tcp any any eq pop3"
-
-    - name: "Apply block: ip access-list extended AutoQos-4.0-wlan-Acl-MultiEnhance..."
-      cisco.ios.ios_config:
-        parents: "ip access-list extended AutoQos-4.0-wlan-Acl-MultiEnhanced-Conf"
-        lines:
-          - "10 permit udp any any range 16384 32767"
-          - "20 permit tcp any any range 50000 59999"
-
-    - name: "Apply block: ip access-list extended AutoQos-4.0-wlan-Acl-Scavanger"
-      cisco.ios.ios_config:
-        parents: "ip access-list extended AutoQos-4.0-wlan-Acl-Scavanger"
-        lines:
-          - "10 permit tcp any any range 2300 2400"
-          - "20 permit udp any any range 2300 2400"
-          - "30 permit tcp any any range 6881 6999"
-          - "40 permit tcp any any range 28800 29100"
-          - "50 permit tcp any any eq 1214"
-          - "60 permit udp any any eq 1214"
-          - "70 permit tcp any any eq 3689"
-          - "80 permit udp any any eq 3689"
-          - "90 permit tcp any any eq 11999"
-
-    - name: "Apply block: ip access-list extended AutoQos-4.0-wlan-Acl-Signaling"
-      cisco.ios.ios_config:
-        parents: "ip access-list extended AutoQos-4.0-wlan-Acl-Signaling"
-        lines:
-          - "10 permit tcp any any range 2000 2002"
-          - "20 permit tcp any any range 5060 5061"
-          - "30 permit udp any any range 5060 5061"
-
-    - name: "Apply block: ip access-list extended AutoQos-4.0-wlan-Acl-Transactiona..."
-      cisco.ios.ios_config:
-        parents: "ip access-list extended AutoQos-4.0-wlan-Acl-Transactional-Data"
-        lines:
-          - "10 permit tcp any any eq 443"
-          - "20 permit tcp any any eq 1521"
-          - "30 permit udp any any eq 1521"
-          - "40 permit tcp any any eq 1526"
-          - "50 permit udp any any eq 1526"
-          - "60 permit tcp any any eq 1575"
-          - "70 permit udp any any eq 1575"
-          - "80 permit tcp any any eq 1630"
-          - "90 permit udp any any eq 1630"
-          - "100 permit tcp any any eq 1527"
-          - "110 permit tcp any any eq 6200"
-          - "120 permit tcp any any eq 3389"
-          - "130 permit tcp any any eq 5985"
-          - "140 permit tcp any any eq 8080"
-
-    - name: "Apply block: route-map TPX-EGRESS-OUT permit 10"
-      cisco.ios.ios_config:
-        parents: "route-map TPX-EGRESS-OUT permit 10"
-        lines:
-          - "match ip address TPX-EGRESS-OUT"
-
-    - name: "Apply block: route-map TPX-INGRESS-IN permit 10"
-      cisco.ios.ios_config:
-        parents: "route-map TPX-INGRESS-IN permit 10"
-        lines:
-          - "match ip address TPX-INGRESS-IN"
-
-    - name: "Apply block: radius server FRS-SRVR05"
-      cisco.ios.ios_config:
-        parents: "radius server FRS-SRVR05"
-        lines:
-          - "address ipv4 10.134.25.41 auth-port 1812 acct-port 1813"
-          - "key 7 115113004436332E370731"
-
-    - name: "Apply block: radius server COI-SRVR47"
-      cisco.ios.ios_config:
-        parents: "radius server COI-SRVR47"
-        lines:
-          - "address ipv4 10.137.2.105 auth-port 1812 acct-port 1813"
-          - "key 7 05530C0A7268762B2A280D"
-
-    - name: "Apply block: radius server RIV-SRVR18"
-      cisco.ios.ios_config:
-        parents: "radius server RIV-SRVR18"
-        lines:
-          - "address ipv4 10.191.8.62 auth-port 1812 acct-port 1813"
-          - "key 7 014B0C01082F3E2D126154"
-
-    - name: "Apply block: control-plane"
-      cisco.ios.ios_config:
-        parents: control-plane
-        lines:
-          - "service-policy input system-cpp-policy"
 
     - name: "Apply block: line con 0"
       cisco.ios.ios_config:
@@ -1265,4 +1276,29 @@
         lines:
           - "transport input ssh"
           - "transport output ssh"
+
+    - name: "Apply block: archive"
+      cisco.ios.ios_config:
+        parents: archive
+        lines:
+          - "path ftp://COI-SRVR34.quinn.com/FRS/$h.txt"
+          - write-memory
+
+    - name: "Apply block: redundancy"
+      cisco.ios.ios_config:
+        parents: redundancy
+        lines:
+          - "mode sso"
+
+    - name: "Apply block: transceiver type all"
+      cisco.ios.ios_config:
+        parents: "transceiver type all"
+        lines:
+          - monitoring
+
+    - name: "Apply block: control-plane"
+      cisco.ios.ios_config:
+        parents: control-plane
+        lines:
+          - "service-policy input system-cpp-policy"
 
