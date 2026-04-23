@@ -276,6 +276,220 @@ def render_task(task: Task, indent: int = 4) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Block classifier and typed-bucket parser
+# ---------------------------------------------------------------------------
+
+# Ordered list of (predicate, bucket_name). First match wins.
+_CLASSIFIERS: list[tuple[str, object]] = []
+
+
+def classify_block(header: str) -> str:
+    """Return the bucket name for a block header."""
+    h = header.strip()
+    # Prefix and exact matches
+    if h.startswith("hostname "):
+        return "hostname"
+    if h.startswith("ip domain name "):
+        return "domain"
+    if h.startswith("ip name-server "):
+        return "name_server"
+    if re.match(r'^vlan\s+\d+\s+name\s+', h, re.IGNORECASE):
+        return "vlan_inline"
+    if h.startswith("interface "):
+        return "interface"
+    if h.startswith("vrf definition "):
+        return "vrf"
+    if h.startswith("ip dhcp pool "):
+        return "dhcp_pool"
+    if h.startswith("ip dhcp excluded-address "):
+        return "dhcp_excluded"
+    if h.startswith("flow record "):
+        return "flow_record"
+    if h.startswith("flow exporter "):
+        return "flow_exporter"
+    if h.startswith("flow monitor "):
+        return "flow_monitor"
+    if h.startswith("ip access-list "):
+        return "acl"
+    if h.startswith("route-map "):
+        return "route_map"
+    if h.startswith("router bgp"):
+        return "bgp"
+    if h.startswith("radius server "):
+        return "radius_server"
+    if h.startswith("snmp-server view "):
+        return "snmp_view"
+    if h.startswith("snmp-server community "):
+        return "snmp_community"
+    if h == "archive" or h.startswith("archive "):
+        return "archive"
+    if h == "redundancy":
+        return "redundancy"
+    if h.startswith("transceiver "):
+        return "transceiver"
+    if h == "control-plane":
+        return "control_plane"
+    if h.startswith("line "):
+        return "line_block"
+    if re.match(r'^banner\s+\S+\s+\S+$', h):
+        return "banner_header"
+    if h == "aaa new-model" or h.startswith("aaa session-id"):
+        return "aaa_new_model"
+    if h.startswith("aaa authentication ") or h.startswith("aaa authorization ") or h.startswith("aaa accounting "):
+        return "aaa_auth"
+    if h.startswith("spanning-tree "):
+        return "stp_global"
+    if h == "ip routing" or h == "no ip routing" or h.startswith("ip forward-protocol"):
+        return "ip_routing_global"
+    if h.startswith("username "):
+        return "user"
+    if h.startswith("logging source-interface") or h.startswith("ip radius source-interface"):
+        return "source_interface_global"
+    if h.startswith("logging "):
+        return "logging"
+    if h.startswith("ntp "):
+        return "ntp"
+    if (h.startswith("ip ftp ") or h.startswith("ip http ")
+            or h.startswith("no ip http ") or h.startswith("no ip ftp ")):
+        return "ip_service"
+    if (h.startswith("service ") or h.startswith("no service ")
+            or h.startswith("platform ") or h.startswith("no platform ")
+            or h.startswith("clock ") or h.startswith("diagnostic ")
+            or h.startswith("memory ") or h.startswith("login ") or h.startswith("no login ")
+            or h.startswith("no device-tracking ")):
+        return "base_service"
+    return "misc"
+
+
+@dataclass
+class ParsedConfig:
+    # Identity / base
+    hostname: str | None = None
+    domain_name: str | None = None
+    name_servers: list[str] = field(default_factory=list)
+    base_services: list[tuple[str, int, list[tuple[str, int]]]] = field(default_factory=list)
+
+    # AAA & identity
+    users: list[dict] = field(default_factory=list)
+    aaa_new_model: list[tuple] = field(default_factory=list)
+    radius_servers: list[tuple] = field(default_factory=list)
+    aaa_auth: list[tuple] = field(default_factory=list)
+
+    # Forwarding primitives
+    ip_routing_globals: list[tuple] = field(default_factory=list)
+    vrfs: list[tuple] = field(default_factory=list)
+    vlans: list[dict] = field(default_factory=list)
+    stp_globals: list[tuple] = field(default_factory=list)
+    acls: list[tuple] = field(default_factory=list)
+    route_maps: list[tuple] = field(default_factory=list)
+    flow_records: list[tuple] = field(default_factory=list)
+    flow_exporters: list[tuple] = field(default_factory=list)
+    flow_monitors: list[tuple] = field(default_factory=list)
+    snmp_views: list[tuple] = field(default_factory=list)
+    snmp_communities: list[tuple] = field(default_factory=list)
+    dhcp_excluded: list[tuple] = field(default_factory=list)
+    dhcp_pools: list[tuple] = field(default_factory=list)
+
+    # Interfaces (structured — parse_interface output)
+    interfaces: list[dict] = field(default_factory=list)
+
+    # Services & protocols that depend on interfaces
+    bgp: list[tuple] = field(default_factory=list)
+    source_interface_globals: list[tuple] = field(default_factory=list)
+    logging: list[tuple] = field(default_factory=list)
+    ntp_servers: list[str] = field(default_factory=list)
+    ip_services: list[tuple] = field(default_factory=list)
+
+    # Management / housekeeping
+    banners: list[tuple[str, str]] = field(default_factory=list)
+    line_blocks: list[tuple] = field(default_factory=list)
+    archive: list[tuple] = field(default_factory=list)
+    redundancy: list[tuple] = field(default_factory=list)
+    transceiver: list[tuple] = field(default_factory=list)
+    control_plane: list[tuple] = field(default_factory=list)
+    misc_blocks: list[tuple] = field(default_factory=list)
+
+
+def parse_config(text: str) -> ParsedConfig:
+    """Parse the raw Cisco config text into a ParsedConfig with typed buckets."""
+    cfg = ParsedConfig()
+    lines = text.splitlines()
+    banners, stripped = extract_banners(lines)
+    for kind, body in banners:
+        cfg.banners.append((kind, body))
+    blocks = parse_blocks(stripped)
+
+    for header, header_ln, children_with_ln in blocks:
+        bucket = classify_block(header)
+        children = [c for c, _ln in children_with_ln]
+
+        if bucket == "hostname":
+            cfg.hostname = header.split(None, 1)[1].strip()
+            continue
+        if bucket == "domain":
+            cfg.domain_name = header[len("ip domain name "):].strip()
+            continue
+        if bucket == "name_server":
+            cfg.name_servers.extend(header.split()[2:])
+            continue
+        if bucket == "vlan_inline":
+            m = VLAN_INLINE.match(header)
+            if m:
+                cfg.vlans.append({"vlan_id": int(m.group(1)), "name": m.group(2).strip()})
+            continue
+        if bucket == "interface":
+            cfg.interfaces.append(parse_interface(header, children))
+            continue
+        if bucket == "user":
+            if not children:  # one-liner
+                u = parse_username(header)
+                if u is not None:
+                    cfg.users.append(u)
+            continue
+        if bucket == "ntp":
+            if header.startswith("ntp server "):
+                cfg.ntp_servers.append(header.split(None, 2)[2].strip())
+            continue
+        if header in ("end", "!"):
+            continue
+
+        block = (header, header_ln, children_with_ln)
+        bucket_map = {
+            "base_service": cfg.base_services,
+            "aaa_new_model": cfg.aaa_new_model,
+            "radius_server": cfg.radius_servers,
+            "aaa_auth": cfg.aaa_auth,
+            "ip_routing_global": cfg.ip_routing_globals,
+            "vrf": cfg.vrfs,
+            "stp_global": cfg.stp_globals,
+            "acl": cfg.acls,
+            "route_map": cfg.route_maps,
+            "flow_record": cfg.flow_records,
+            "flow_exporter": cfg.flow_exporters,
+            "flow_monitor": cfg.flow_monitors,
+            "snmp_view": cfg.snmp_views,
+            "snmp_community": cfg.snmp_communities,
+            "dhcp_excluded": cfg.dhcp_excluded,
+            "dhcp_pool": cfg.dhcp_pools,
+            "bgp": cfg.bgp,
+            "source_interface_global": cfg.source_interface_globals,
+            "logging": cfg.logging,
+            "ip_service": cfg.ip_services,
+            "line_block": cfg.line_blocks,
+            "archive": cfg.archive,
+            "redundancy": cfg.redundancy,
+            "transceiver": cfg.transceiver,
+            "control_plane": cfg.control_plane,
+        }
+        if bucket in bucket_map:
+            bucket_map[bucket].append(block)
+        else:
+            cfg.misc_blocks.append(block)
+
+    return cfg
+
+
+# ---------------------------------------------------------------------------
 # Playbook builder
 # ---------------------------------------------------------------------------
 
