@@ -1,0 +1,21 @@
+# Claude Code per-project settings (personal overrides, not shared)
+.claude/
+
+# Generated playbook artifacts — regenerate from source config files
+FRS-QRS-SW01-*.yml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
