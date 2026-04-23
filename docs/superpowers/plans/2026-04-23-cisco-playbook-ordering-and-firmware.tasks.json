@@ -1,0 +1,19 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-23-cisco-playbook-ordering-and-firmware.md",
+  "branch": "feat/ordering-validation-firmware",
+  "tasks": [
+    {"id": "7",  "subject": "Task 0: Create feature branch and commit plan", "status": "pending", "blockedBy": [],      "lastUpdated": null},
+    {"id": "8",  "subject": "Task 1: Test scaffolding + baseline regression fixture", "status": "pending", "blockedBy": ["7"], "lastUpdated": null},
+    {"id": "9",  "subject": "Task 2: Track source line numbers in parse_blocks", "status": "pending", "blockedBy": ["8"], "lastUpdated": null},
+    {"id": "10", "subject": "Task 3: Task dataclass + in-memory task list", "status": "pending", "blockedBy": ["9"], "lastUpdated": null},
+    {"id": "11", "subject": "Task 4: Classify blocks into typed buckets", "status": "pending", "blockedBy": ["10"], "lastUpdated": null},
+    {"id": "12", "subject": "Task 5: Six-phase emission order", "status": "pending", "blockedBy": ["11"], "lastUpdated": null},
+    {"id": "13", "subject": "Task 6: Structural dependency check", "status": "pending", "blockedBy": ["12"], "lastUpdated": null},
+    {"id": "14", "subject": "Task 7: IPv4 format and mask validation", "status": "pending", "blockedBy": ["13"], "lastUpdated": null},
+    {"id": "15", "subject": "Task 8: Subnet-membership validation", "status": "pending", "blockedBy": ["14"], "lastUpdated": null},
+    {"id": "16", "subject": "Task 9: --strict and --no-validate CLI flags", "status": "pending", "blockedBy": ["15"], "lastUpdated": null},
+    {"id": "17", "subject": "Task 10: Stderr validation summary", "status": "pending", "blockedBy": ["16"], "lastUpdated": null},
+    {"id": "18", "subject": "Task 11: Firmware upgrade preamble builder", "status": "pending", "blockedBy": ["17"], "lastUpdated": null},
+    {"id": "19", "subject": "Task 12: Wire --with-upgrade and firmware golden fixture", "status": "pending", "blockedBy": ["18"], "lastUpdated": null}
+  ]
+}
