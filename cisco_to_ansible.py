@@ -57,17 +57,11 @@ def extract_banners(lines: list[str]) -> tuple[list[tuple[str, str]], list[str]]
     return banners, remaining
 
 
-def parse_blocks(lines: Iterable[str]) -> list[tuple[str, list[str]]]:
-    """Split config into (header, [children]) blocks.
-
-    A block is introduced by a line starting in column 0 and continues while
-    following lines are indented. Blank lines and bang-comment lines ('!') end
-    the current block. Children are stripped of leading whitespace but keep
-    internal spacing.
-    """
-    blocks: list[tuple[str, list[str]]] = []
-    current: tuple[str, list[str]] | None = None
-    for raw in lines:
+def parse_blocks(lines: Iterable[str]) -> list[tuple[str, int, list[tuple[str, int]]]]:
+    """Split config into (header, header_lineno, [(child, child_lineno)]) blocks."""
+    blocks: list[tuple[str, int, list[tuple[str, int]]]] = []
+    current: tuple[str, int, list[tuple[str, int]]] | None = None
+    for idx, raw in enumerate(lines, start=1):
         line = raw.rstrip('\r\n')
         stripped = line.rstrip()
         if stripped == '' or stripped == '!':
@@ -78,11 +72,11 @@ def parse_blocks(lines: Iterable[str]) -> list[tuple[str, list[str]]]:
         if line.startswith((' ', '\t')):
             if current is None:
                 continue
-            current[1].append(line.strip())
+            current[2].append((line.strip(), idx))
         else:
             if current is not None:
                 blocks.append(current)
-            current = (stripped, [])
+            current = (stripped, idx, [])
     if current is not None:
         blocks.append(current)
     return blocks
@@ -286,7 +280,8 @@ def build_playbook(blocks: list[tuple[str, list[str]]],
         'logging ',
     )
 
-    for header, children in blocks:
+    for header, header_lineno, children_with_ln in blocks:
+        children = [c for c, _ln in children_with_ln]
         # pure one-line entries
         if not children:
             line = header.strip()
@@ -551,7 +546,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Peek at hostname (for default --host).
     hostname_hint = None
-    for hdr, _ in blocks:
+    for hdr, _ln, _children in blocks:
         if hdr.startswith('hostname '):
             hostname_hint = hdr.split(None, 1)[1].strip()
             break
