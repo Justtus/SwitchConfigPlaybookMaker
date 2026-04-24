@@ -949,6 +949,101 @@ def validate_ip_formats(cfg: ParsedConfig) -> tuple[list[str], list[str]]:
     return errors, warnings
 
 
+def _build_dhcp_pool_index(cfg: ParsedConfig) -> dict[str, ipaddress.IPv4Network]:
+    idx: dict[str, ipaddress.IPv4Network] = {}
+    for header, _ln, children_ln in cfg.dhcp_pools:
+        for child, _cln in children_ln:
+            if child.startswith("network "):
+                parts = child.split()
+                if len(parts) >= 3 and _valid_ipv4(parts[1]) and _valid_ipv4(parts[2]) and _contiguous_mask(parts[2]):
+                    idx[header] = _network_of(parts[1], parts[2])
+                    break
+    return idx
+
+
+def _build_interface_subnet_index(cfg: ParsedConfig) -> dict[str, ipaddress.IPv4Interface]:
+    idx: dict[str, ipaddress.IPv4Interface] = {}
+    for ifc in cfg.interfaces:
+        for addr in ifc["ipv4"]:
+            parts = addr.split()
+            if len(parts) >= 2 and _valid_ipv4(parts[0]) and _valid_ipv4(parts[1]) and _contiguous_mask(parts[1]):
+                idx[ifc["name"]] = ipaddress.IPv4Interface(f"{parts[0]}/{_prefix_len(parts[1])}")
+                break
+    return idx
+
+
+def validate_subnet_membership(cfg: ParsedConfig) -> tuple[list[str], list[str]]:
+    """Return (hard_warnings, soft_warnings).
+    hard: same-block relationships (promotable by --strict).
+    soft: across-block relationships (never promoted)."""
+    hard: list[str] = []
+    soft: list[str] = []
+
+    def warn_hard(lineno: int, ctx: str, msg: str):
+        hard.append(f"WARNING: line {lineno} ({ctx}): {msg}")
+
+    def warn_soft(lineno: int, ctx: str, msg: str):
+        soft.append(f"WARNING: line {lineno} ({ctx}): {msg}")
+
+    pools = _build_dhcp_pool_index(cfg)
+    ifaces = _build_interface_subnet_index(cfg)
+    all_pool_networks = list(pools.values())
+
+    for header, ln, children_ln in cfg.dhcp_pools:
+        pool_net = pools.get(header)
+        for child, child_ln in children_ln:
+            if pool_net and child.startswith("default-router "):
+                parts = child.split()
+                if len(parts) >= 2 and _valid_ipv4(parts[1]):
+                    a = ipaddress.IPv4Address(parts[1])
+                    if a not in pool_net:
+                        warn_hard(child_ln, f"{header} / default-router",
+                                  f"{parts[1]} is not in the pool subnet {pool_net}")
+            elif pool_net and child.startswith("host "):
+                parts = child.split()
+                if len(parts) >= 2 and _valid_ipv4(parts[1]):
+                    a = ipaddress.IPv4Address(parts[1])
+                    if a not in pool_net:
+                        warn_hard(child_ln, f"{header} / host",
+                                  f"{parts[1]} is not in the pool subnet {pool_net}")
+            elif pool_net is None and child.startswith("host "):
+                # Parent pool has no `network` line — check against ALL pool nets
+                parts = child.split()
+                if len(parts) >= 2 and _valid_ipv4(parts[1]):
+                    a = ipaddress.IPv4Address(parts[1])
+                    if not any(a in n for n in all_pool_networks):
+                        warn_soft(child_ln, f"{header} / host",
+                                  f"{parts[1]} is not in any defined DHCP pool network; "
+                                  f"possible reservation outside any declared pool")
+
+    for header, ln, _c in cfg.dhcp_excluded:
+        parts = header.split()
+        if len(parts) >= 4:
+            endpoints = [parts[3]] + ([parts[4]] if len(parts) >= 5 else [])
+            for ep in endpoints:
+                if _valid_ipv4(ep):
+                    a = ipaddress.IPv4Address(ep)
+                    if all_pool_networks and not any(a in n for n in all_pool_networks):
+                        warn_soft(ln, "ip dhcp excluded-address",
+                                  f"{ep} is not in any defined DHCP pool network")
+
+    for header, ln, children_ln in cfg.bgp:
+        for child, child_ln in children_ln:
+            m = re.match(r'^neighbor (\S+) remote-as ', child)
+            if not m:
+                continue
+            nbr_str = m.group(1)
+            if not _valid_ipv4(nbr_str):
+                continue
+            nbr = ipaddress.IPv4Address(nbr_str)
+            if any(nbr in iface.network for iface in ifaces.values()):
+                continue
+            warn_soft(child_ln, f"{header} / neighbor",
+                      f"{nbr_str} is not directly connected to any interface subnet")
+
+    return hard, soft
+
+
 # ---------------------------------------------------------------------------
 # Dependency check (structural validation)
 # ---------------------------------------------------------------------------
@@ -1188,6 +1283,12 @@ def main(argv: list[str] | None = None) -> int:
     for e in ip_errors:
         print(e, file=sys.stderr)
     for w in ip_warnings:
+        print(w, file=sys.stderr)
+
+    sm_hard, sm_soft = validate_subnet_membership(cfg)
+    for w in sm_hard:
+        print(w, file=sys.stderr)
+    for w in sm_soft:
         print(w, file=sys.stderr)
 
     if ip_errors:
