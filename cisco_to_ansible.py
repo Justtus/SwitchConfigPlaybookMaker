@@ -267,13 +267,25 @@ class Task:
     origin: list[tuple[str, int, list[tuple[str, int]]]] = field(default_factory=list)
 
 
+TASK_LEVEL_KEYS = {"when", "register", "delegate_to", "failed_when", "changed_when"}
+
+
 def render_task(task: Task, indent: int = 4) -> list[str]:
-    """Render a Task as YAML lines. Drops the trailing blank separator line
-    emitted by the low-level emit_task helper; the playbook assembler joins
-    tasks with explicit blank lines."""
-    rendered = emit_task(task.name, task.module, task.params, indent=indent)
-    # emit_task appends a trailing '' for visual separation; strip it.
-    return rendered[:-1] if rendered and rendered[-1] == '' else rendered
+    pad = ' ' * indent
+    inner = ' ' * (indent + 2)
+    param_pad = ' ' * (indent + 4)
+
+    task_level = [(k, v) for k, v in task.params if k in TASK_LEVEL_KEYS]
+    module_level = [(k, v) for k, v in task.params if k not in TASK_LEVEL_KEYS]
+
+    out = [f'{pad}- name: {yaml_scalar(task.name)}']
+    out.append(f'{inner}{task.module}:')
+    for key, value in module_level:
+        out.extend(_emit_param(key, value, prefix=param_pad))
+    for key, value in task_level:
+        # task-level keys sit at the same indent as the module key
+        out.extend(_emit_param(key, value, prefix=inner))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1251,6 +1263,167 @@ def _build_interface_tasks(interfaces: list[dict]) -> list[Task]:
             module="cisco.ios.ios_config",
             params=[("parents", f"interface {ifc['name']}"), ("lines", residue)],
         ))
+    return tasks
+
+
+# ---------------------------------------------------------------------------
+# Firmware upgrade preamble
+# ---------------------------------------------------------------------------
+
+_FIRMWARE_GATE = "firmware_upgrade_needed | default(true)"
+
+
+def build_firmware_preamble() -> list[Task]:
+    """Return the 15 Tasks of the opt-in firmware upgrade preamble.
+    All configuration is supplied at play-run time via Ansible vars.
+    Tasks 3–15 are gated on `firmware_upgrade_needed` (set by task 2)."""
+
+    def gated_params(core: list[tuple[str, object]]) -> list[tuple[str, object]]:
+        return core + [("when", _FIRMWARE_GATE)]
+
+    tasks: list[Task] = [
+        Task(
+            name="Firmware: gather pre-upgrade facts",
+            module="cisco.ios.ios_facts",
+            params=[("gather_subset", ["min"]), ("register", "preupgrade_facts")],
+        ),
+        Task(
+            name="Firmware: decide whether upgrade is needed",
+            module="ansible.builtin.set_fact",
+            params=[
+                ("firmware_upgrade_needed",
+                 "{{ preupgrade_facts.ansible_facts.ansible_net_version != firmware_target_version }}"),
+            ],
+        ),
+        Task(
+            name="Firmware: verify image exists on USB",
+            module="cisco.ios.ios_command",
+            params=gated_params([
+                ("commands", ["dir {{ firmware_usb_device | default('usbflash0:') }}"]),
+                ("register", "usb_listing"),
+                ("failed_when",
+                 "firmware_image not in (usb_listing.stdout[0] | default(''))"),
+            ]),
+        ),
+        Task(
+            name="Firmware: verify free space on flash",
+            module="cisco.ios.ios_command",
+            params=gated_params([
+                ("commands", ["dir {{ firmware_flash_device | default('flash:') }}"]),
+                ("register", "flash_listing"),
+                ("failed_when",
+                 "(flash_listing.stdout[0] | regex_search('([0-9]+) bytes free', '\\\\1') "
+                 "| first | default('0') | int) < "
+                 "((firmware_image_size_bytes | default(1073741824)) * 1.1)"),
+            ]),
+        ),
+        Task(
+            name="Firmware: capture pre-upgrade show version",
+            module="ansible.builtin.copy",
+            params=gated_params([
+                ("content",
+                 "{{ lookup('ansible.builtin.pipe', 'echo pre-upgrade show version') }}"
+                 "\n{{ preupgrade_facts.ansible_facts.ansible_net_version }}"
+                 "\n{{ preupgrade_facts.ansible_facts.ansible_net_image | default('unknown') }}"),
+                ("dest",
+                 "{{ firmware_audit_dir | default('./audit') }}/{{ inventory_hostname }}"
+                 "-pre-{{ ansible_date_time.iso8601_basic_short }}.txt"),
+                ("delegate_to", "localhost"),
+            ]),
+        ),
+        Task(
+            name="Firmware: copy image from USB to flash",
+            module="cisco.ios.ios_command",
+            params=gated_params([
+                ("commands", [{
+                    "command": "copy {{ firmware_usb_device | default('usbflash0:') }}"
+                               "{{ firmware_image }} {{ firmware_flash_device | default('flash:') }}",
+                    "prompt": "(Destination filename.*|Do you want to over write)",
+                    "answer": "\\r",
+                }]),
+            ]),
+        ),
+        Task(
+            name="Firmware: verify MD5 on flash",
+            module="cisco.ios.ios_command",
+            params=gated_params([
+                ("commands",
+                 ["verify /md5 {{ firmware_flash_device | default('flash:') }}"
+                  "{{ firmware_image }} {{ firmware_md5 }}"]),
+                ("register", "md5_out"),
+                ("failed_when", "'Verified' not in md5_out.stdout[0]"),
+            ]),
+        ),
+        Task(
+            name="Firmware: set boot variable",
+            module="cisco.ios.ios_config",
+            params=gated_params([
+                ("lines", ["no boot system",
+                           "boot system flash:{{ firmware_image }}"]),
+                ("save_when", "modified"),
+            ]),
+        ),
+        Task(
+            name="Firmware: save running-config (write memory)",
+            module="cisco.ios.ios_command",
+            params=gated_params([("commands", ["write memory"])]),
+        ),
+        Task(
+            name="Firmware: remember prior image for later cleanup",
+            module="ansible.builtin.set_fact",
+            params=gated_params([
+                ("firmware_prior_image",
+                 "{{ preupgrade_facts.ansible_facts.ansible_net_image | default('') | basename }}"),
+            ]),
+        ),
+        Task(
+            name="Firmware: schedule reload with countdown",
+            module="cisco.ios.ios_command",
+            params=gated_params([
+                ("commands", [{
+                    "command": "reload in {{ firmware_reload_countdown | default(5) }} "
+                               "firmware upgrade via ansible",
+                    "prompt": "(confirm|\\[yes/no\\])",
+                    "answer": "y\\ry\\r",
+                }]),
+            ]),
+        ),
+        Task(
+            name="Firmware: pause until reload window starts",
+            module="ansible.builtin.pause",
+            params=gated_params([
+                ("seconds",
+                 "{{ (firmware_reload_countdown | default(5) | int) * 60 + 30 }}"),
+            ]),
+        ),
+        Task(
+            name="Firmware: wait for connection after reload",
+            module="ansible.builtin.wait_for_connection",
+            params=gated_params([
+                ("delay", 60),
+                ("timeout", "{{ firmware_reload_timeout | default(900) }}"),
+            ]),
+        ),
+        Task(
+            name="Firmware: post-upgrade facts and version assert",
+            module="cisco.ios.ios_facts",
+            params=gated_params([
+                ("gather_subset", ["min"]),
+                ("register", "postupgrade_facts"),
+            ]),
+        ),
+        Task(
+            name="Firmware: capture post-upgrade show version and assert target",
+            module="ansible.builtin.assert",
+            params=gated_params([
+                ("that",
+                 ["postupgrade_facts.ansible_facts.ansible_net_version == firmware_target_version"]),
+                ("fail_msg",
+                 "Post-upgrade version {{ postupgrade_facts.ansible_facts.ansible_net_version }} "
+                 "!= target {{ firmware_target_version }}"),
+            ]),
+        ),
+    ]
     return tasks
 
 
