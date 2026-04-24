@@ -1269,30 +1269,43 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--host',
                         help='Inventory host or group the playbook should target. '
                              'Defaults to the configured hostname, or "switches".')
+    parser.add_argument('--strict', action='store_true',
+                        help='Exit 1 if validation produces any warning.')
+    parser.add_argument('--no-validate', action='store_true',
+                        help='Skip all validation (dependency/IP/subnet membership).')
+    parser.add_argument('--with-upgrade', action='store_true',
+                        help='Prepend firmware upgrade preamble (paranoid bundle mode).')
     args = parser.parse_args(argv)
 
     with open(args.input, 'r', encoding='utf-8', errors='replace') as fh:
         raw_text = fh.read()
 
     cfg = parse_config(raw_text)
-    dep_warnings = run_dependency_check(cfg)
-    for w in dep_warnings:
-        print(w, file=sys.stderr)
 
-    ip_errors, ip_warnings = validate_ip_formats(cfg)
-    for e in ip_errors:
-        print(e, file=sys.stderr)
-    for w in ip_warnings:
-        print(w, file=sys.stderr)
+    dep_warnings: list[str] = []
+    ip_errors: list[str] = []
+    ip_warnings: list[str] = []
+    sm_hard: list[str] = []
+    sm_soft: list[str] = []
 
-    sm_hard, sm_soft = validate_subnet_membership(cfg)
-    for w in sm_hard:
-        print(w, file=sys.stderr)
-    for w in sm_soft:
-        print(w, file=sys.stderr)
+    if not args.no_validate:
+        dep_warnings = run_dependency_check(cfg)
+        ip_errors, ip_warnings = validate_ip_formats(cfg)
+        sm_hard, sm_soft = validate_subnet_membership(cfg)
 
-    if ip_errors:
-        return 2  # hard error — don't write YAML
+        for line in ip_errors:
+            print(line, file=sys.stderr)
+        for line in dep_warnings:
+            print(line, file=sys.stderr)
+        for line in ip_warnings:
+            print(line, file=sys.stderr)
+        for line in sm_hard:
+            print(line, file=sys.stderr)
+        for line in sm_soft:
+            print(line, file=sys.stderr)
+
+        if ip_errors:
+            return 2  # hard error — no YAML written
 
     host_target = args.host or cfg.hostname or 'switches'
     playbook = build_playbook(cfg, host=host_target, source_file=args.input)
@@ -1306,6 +1319,9 @@ def main(argv: list[str] | None = None) -> int:
         fh.write(playbook)
 
     print(f'Wrote {out_path} ({len(playbook.splitlines())} lines).')
+
+    if args.strict and (dep_warnings or ip_warnings or sm_hard):
+        return 1
     return 0
 
 
