@@ -12,6 +12,7 @@ else falls back to cisco.ios.ios_config tasks, preserving parent/child scoping.
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import os
 import re
 import sys
@@ -734,6 +735,194 @@ def build_playbook(cfg: ParsedConfig, host: str, source_file: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# IP format and mask validation
+# ---------------------------------------------------------------------------
+
+class IPValidationError(Exception):
+    """Raised when malformed IPv4 on a required field makes generation impossible."""
+
+
+def _looks_like_ip(token: str) -> bool:
+    # Four octet-ish dotted tokens
+    return bool(re.match(r'^\d{1,3}(\.\d{1,3}){3}$', token))
+
+
+def _valid_ipv4(token: str) -> bool:
+    try:
+        ipaddress.IPv4Address(token)
+        return True
+    except ValueError:
+        return False
+
+
+def _contiguous_mask(mask: str) -> bool:
+    try:
+        n = int(ipaddress.IPv4Address(mask))
+    except ValueError:
+        return False
+    # Contiguous: complement (32-bit NOT) must be all trailing 1s, i.e. (c & (c+1)) == 0
+    c = (~n) & 0xFFFFFFFF
+    return (c & (c + 1)) == 0
+
+
+def _prefix_len(mask: str) -> int:
+    n = int(ipaddress.IPv4Address(mask))
+    return bin(n).count("1")
+
+
+def _network_of(ip: str, mask: str) -> ipaddress.IPv4Network:
+    return ipaddress.IPv4Network(f"{ip}/{_prefix_len(mask)}", strict=False)
+
+
+def validate_ip_formats(cfg: ParsedConfig) -> tuple[list[str], list[str]]:
+    """Return (errors, warnings). Errors are fatal (exit 2); warnings print to stderr."""
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    def err(lineno: int, context: str, msg: str):
+        errors.append(f"ERROR: line {lineno} ({context}): {msg}")
+
+    def warn(lineno: int, context: str, msg: str):
+        warnings.append(f"WARNING: line {lineno} ({context}): {msg}")
+
+    # Interface IPs
+    for ifc in cfg.interfaces:
+        for addr_str in ifc["ipv4"]:
+            parts = addr_str.split()
+            if len(parts) < 2:
+                continue
+            ip, mask = parts[0], parts[1]
+            ctx = f"interface {ifc['name']} / ip address"
+            if not _valid_ipv4(ip):
+                err(0, ctx, f"{ip} {mask} — invalid IPv4 address")
+                continue
+            if not _valid_ipv4(mask):
+                err(0, ctx, f"{ip} {mask} — invalid mask")
+                continue
+            if not _contiguous_mask(mask):
+                warn(0, ctx, f"{ip} {mask} — non-contiguous IPv4 mask")
+                continue
+            net = _network_of(ip, mask)
+            if ipaddress.IPv4Address(ip) == net.network_address:
+                warn(0, ctx, f"{ip} is the network address of {net} — not a host")
+            if ipaddress.IPv4Address(ip) == net.broadcast_address:
+                warn(0, ctx, f"{ip} is the broadcast address of {net} — not a host")
+
+    # Name servers
+    for ns in cfg.name_servers:
+        if not _valid_ipv4(ns):
+            errors.append(f"ERROR: ip name-server: {ns} — invalid IPv4 address")
+
+    # Logging host, NTP server: IP-looking tokens are validated; hostnames are skipped
+    for header, ln, _children in cfg.logging:
+        m = re.match(r'^logging host (\S+)', header)
+        if m:
+            tok = m.group(1)
+            if _looks_like_ip(tok) and not _valid_ipv4(tok):
+                err(ln, "logging host", f"{tok} — invalid IPv4 address")
+    for s in cfg.ntp_servers:
+        if _looks_like_ip(s) and not _valid_ipv4(s):
+            errors.append(f"ERROR: ntp server: {s} — invalid IPv4 address")
+
+    # DHCP pools
+    for header, ln, children_ln in cfg.dhcp_pools:
+        pool_network: ipaddress.IPv4Network | None = None
+        for child, child_ln in children_ln:
+            if child.startswith("network "):
+                parts = child.split()
+                if len(parts) >= 3:
+                    ip, mask = parts[1], parts[2]
+                    ctx = f"{header} / network"
+                    if not _valid_ipv4(ip):
+                        err(child_ln, ctx, f"{ip} {mask} — invalid IPv4 address")
+                    elif not _valid_ipv4(mask) or not _contiguous_mask(mask):
+                        warn(child_ln, ctx, f"{ip} {mask} — invalid mask")
+                    else:
+                        net = _network_of(ip, mask)
+                        pool_network = net
+                        if ipaddress.IPv4Address(ip) != net.network_address:
+                            warn(child_ln, ctx,
+                                 f"{ip} has host bits set for /{net.prefixlen} (network is {net.network_address})")
+            elif child.startswith("default-router "):
+                parts = child.split()
+                if len(parts) >= 2:
+                    router = parts[1]
+                    ctx = f"{header} / default-router"
+                    if not _valid_ipv4(router):
+                        err(child_ln, ctx, f"{router} — invalid IPv4 address")
+                    elif pool_network is not None:
+                        a = ipaddress.IPv4Address(router)
+                        if a not in pool_network:
+                            warn(child_ln, ctx,
+                                 f"{router} is not in the pool subnet {pool_network}")
+                        elif a == pool_network.network_address:
+                            warn(child_ln, ctx,
+                                 f"{router} is the network address, not a host address")
+                        elif a == pool_network.broadcast_address:
+                            warn(child_ln, ctx,
+                                 f"{router} is the broadcast address, not a host address")
+            elif child.startswith("dns-server "):
+                for tok in child.split()[1:]:
+                    if not _valid_ipv4(tok):
+                        err(child_ln, f"{header} / dns-server",
+                            f"{tok} — invalid IPv4 address")
+            elif child.startswith("host "):
+                parts = child.split()
+                if len(parts) >= 3:
+                    ip, mask = parts[1], parts[2]
+                    ctx = f"{header} / host"
+                    if not _valid_ipv4(ip):
+                        err(child_ln, ctx, f"{ip} {mask} — invalid IPv4 address")
+                    elif not _valid_ipv4(mask) or not _contiguous_mask(mask):
+                        warn(child_ln, ctx, f"{ip} {mask} — invalid mask")
+
+    # Excluded addresses
+    for header, ln, _c in cfg.dhcp_excluded:
+        parts = header.split()
+        # "ip dhcp excluded-address A [B]"
+        if len(parts) >= 4:
+            a = parts[3]
+            b = parts[4] if len(parts) >= 5 else None
+            if not _valid_ipv4(a) or (b is not None and not _valid_ipv4(b)):
+                err(ln, "ip dhcp excluded-address",
+                    f"{' '.join(parts[3:])} — invalid IPv4 address")
+            elif b is not None and ipaddress.IPv4Address(a) > ipaddress.IPv4Address(b):
+                warn(ln, "ip dhcp excluded-address",
+                     f"{a} > {b} — range bounds inverted")
+
+    # Radius servers
+    for header, ln, children_ln in cfg.radius_servers:
+        for child, child_ln in children_ln:
+            m = re.match(r'^address ipv4 (\S+)', child)
+            if m and not _valid_ipv4(m.group(1)):
+                err(child_ln, f"{header} / address ipv4",
+                    f"{m.group(1)} — invalid IPv4 address")
+
+    # BGP router-id and neighbors
+    for header, ln, children_ln in cfg.bgp:
+        for child, child_ln in children_ln:
+            m = re.match(r'^bgp router-id (\S+)', child)
+            if m and not _valid_ipv4(m.group(1)):
+                err(child_ln, f"{header} / bgp router-id",
+                    f"{m.group(1)} — invalid IPv4 address")
+                continue
+            m = re.match(r'^neighbor (\S+) ', child)
+            if m and _looks_like_ip(m.group(1)) and not _valid_ipv4(m.group(1)):
+                err(child_ln, f"{header} / neighbor",
+                    f"{m.group(1)} — invalid IPv4 address")
+
+    # Flow exporter destinations
+    for header, ln, children_ln in cfg.flow_exporters:
+        for child, child_ln in children_ln:
+            m = re.match(r'^destination (\S+)', child)
+            if m and _looks_like_ip(m.group(1)) and not _valid_ipv4(m.group(1)):
+                err(child_ln, f"{header} / destination",
+                    f"{m.group(1)} — invalid IPv4 address")
+
+    return errors, warnings
+
+
+# ---------------------------------------------------------------------------
 # Dependency check (structural validation)
 # ---------------------------------------------------------------------------
 
@@ -967,6 +1156,16 @@ def main(argv: list[str] | None = None) -> int:
     dep_warnings = run_dependency_check(cfg)
     for w in dep_warnings:
         print(w, file=sys.stderr)
+
+    ip_errors, ip_warnings = validate_ip_formats(cfg)
+    for e in ip_errors:
+        print(e, file=sys.stderr)
+    for w in ip_warnings:
+        print(w, file=sys.stderr)
+
+    if ip_errors:
+        return 2  # hard error — don't write YAML
+
     host_target = args.host or cfg.hostname or 'switches'
     playbook = build_playbook(cfg, host=host_target, source_file=args.input)
 
