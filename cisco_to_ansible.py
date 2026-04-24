@@ -771,6 +771,9 @@ def _prefix_len(mask: str) -> int:
 
 
 def _network_of(ip: str, mask: str) -> ipaddress.IPv4Network:
+    # strict=False: the caller is often inspecting addresses with host bits set
+    # (e.g. a network statement typo) and we still want to compute the enclosing
+    # subnet. The caller is responsible for whatever warning the host bits warrant.
     return ipaddress.IPv4Network(f"{ip}/{_prefix_len(mask)}", strict=False)
 
 
@@ -793,6 +796,9 @@ def validate_ip_formats(cfg: ParsedConfig) -> tuple[list[str], list[str]]:
                 continue
             ip, mask = parts[0], parts[1]
             ctx = f"interface {ifc['name']} / ip address"
+            # ParsedConfig.interfaces[*].ipv4 is a list of address strings with no
+            # source line number (the interface parser discards them). Use 0 as a
+            # sentinel — the context field still identifies the interface.
             if not _valid_ipv4(ip):
                 err(0, ctx, f"{ip} {mask} — invalid IPv4 address")
                 continue
@@ -803,15 +809,20 @@ def validate_ip_formats(cfg: ParsedConfig) -> tuple[list[str], list[str]]:
                 warn(0, ctx, f"{ip} {mask} — non-contiguous IPv4 mask")
                 continue
             net = _network_of(ip, mask)
-            if ipaddress.IPv4Address(ip) == net.network_address:
-                warn(0, ctx, f"{ip} is the network address of {net} — not a host")
-            if ipaddress.IPv4Address(ip) == net.broadcast_address:
-                warn(0, ctx, f"{ip} is the broadcast address of {net} — not a host")
+            # Skip host-semantics warnings for /31 (RFC 3021 point-to-point) and /32
+            # (loopback/host route): network and broadcast addresses are legitimate hosts
+            # at those prefix lengths.
+            if net.prefixlen < 31:
+                a = ipaddress.IPv4Address(ip)
+                if a == net.network_address:
+                    warn(0, ctx, f"{ip} is the network address of {net} — not a host")
+                if a == net.broadcast_address:
+                    warn(0, ctx, f"{ip} is the broadcast address of {net} — not a host")
 
     # Name servers
     for ns in cfg.name_servers:
         if not _valid_ipv4(ns):
-            errors.append(f"ERROR: ip name-server: {ns} — invalid IPv4 address")
+            err(0, "ip name-server", f"{ns} — invalid IPv4 address")
 
     # Logging host, NTP server: IP-looking tokens are validated; hostnames are skipped
     for header, ln, _children in cfg.logging:
@@ -822,11 +833,24 @@ def validate_ip_formats(cfg: ParsedConfig) -> tuple[list[str], list[str]]:
                 err(ln, "logging host", f"{tok} — invalid IPv4 address")
     for s in cfg.ntp_servers:
         if _looks_like_ip(s) and not _valid_ipv4(s):
-            errors.append(f"ERROR: ntp server: {s} — invalid IPv4 address")
+            err(0, "ntp server", f"{s} — invalid IPv4 address")
 
     # DHCP pools
     for header, ln, children_ln in cfg.dhcp_pools:
+        # Pass 1: find the pool's network/mask (if any) so later children can
+        # validate against it regardless of source-file order.
         pool_network: ipaddress.IPv4Network | None = None
+        for child, child_ln in children_ln:
+            if child.startswith("network "):
+                parts = child.split()
+                if (len(parts) >= 3
+                        and _valid_ipv4(parts[1])
+                        and _valid_ipv4(parts[2])
+                        and _contiguous_mask(parts[2])):
+                    pool_network = _network_of(parts[1], parts[2])
+                    break
+
+        # Pass 2: validate every child line, with pool_network already available.
         for child, child_ln in children_ln:
             if child.startswith("network "):
                 parts = child.split()
@@ -835,11 +859,12 @@ def validate_ip_formats(cfg: ParsedConfig) -> tuple[list[str], list[str]]:
                     ctx = f"{header} / network"
                     if not _valid_ipv4(ip):
                         err(child_ln, ctx, f"{ip} {mask} — invalid IPv4 address")
-                    elif not _valid_ipv4(mask) or not _contiguous_mask(mask):
-                        warn(child_ln, ctx, f"{ip} {mask} — invalid mask")
+                    elif not _valid_ipv4(mask):
+                        err(child_ln, ctx, f"{ip} {mask} — invalid mask")
+                    elif not _contiguous_mask(mask):
+                        warn(child_ln, ctx, f"{ip} {mask} — non-contiguous mask")
                     else:
                         net = _network_of(ip, mask)
-                        pool_network = net
                         if ipaddress.IPv4Address(ip) != net.network_address:
                             warn(child_ln, ctx,
                                  f"{ip} has host bits set for /{net.prefixlen} (network is {net.network_address})")
@@ -873,8 +898,10 @@ def validate_ip_formats(cfg: ParsedConfig) -> tuple[list[str], list[str]]:
                     ctx = f"{header} / host"
                     if not _valid_ipv4(ip):
                         err(child_ln, ctx, f"{ip} {mask} — invalid IPv4 address")
-                    elif not _valid_ipv4(mask) or not _contiguous_mask(mask):
-                        warn(child_ln, ctx, f"{ip} {mask} — invalid mask")
+                    elif not _valid_ipv4(mask):
+                        err(child_ln, ctx, f"{ip} {mask} — invalid mask")
+                    elif not _contiguous_mask(mask):
+                        warn(child_ln, ctx, f"{ip} {mask} — non-contiguous mask")
 
     # Excluded addresses
     for header, ln, _c in cfg.dhcp_excluded:

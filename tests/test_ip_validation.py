@@ -1,4 +1,4 @@
-from cisco_to_ansible import validate_ip_formats, parse_config, IPValidationError
+from cisco_to_ansible import validate_ip_formats, parse_config
 
 
 def _cfg(s: str):
@@ -84,3 +84,60 @@ def test_bgp_router_id_invalid_is_error():
     ]))
     errs, warns = validate_ip_formats(cfg)
     assert any("999.0.0.1" in e for e in errs), errs
+
+
+def test_dhcp_pool_invalid_mask_is_error():
+    """Malformed mask on a DHCP pool network is an error, not just a warning."""
+    cfg = _cfg("\n".join([
+        "ip dhcp pool P",
+        " network 10.0.0.0 255.0.256.0",
+        "!",
+    ]))
+    errs, warns = validate_ip_formats(cfg)
+    assert any("10.0.0.0 255.0.256.0" in e for e in errs), (errs, warns)
+
+
+def test_interface_slash_32_loopback_no_host_warning():
+    """A /32 loopback address is not flagged as network or broadcast."""
+    cfg = _cfg("\n".join([
+        "interface Loopback0",
+        " ip address 10.1.1.1 255.255.255.255",
+        "!",
+    ]))
+    errs, warns = validate_ip_formats(cfg)
+    assert errs == []
+    assert all("network address" not in w and "broadcast address" not in w
+               for w in warns), warns
+
+
+def test_interface_slash_31_point_to_point_no_host_warning():
+    """A /31 point-to-point address using network number is not flagged."""
+    cfg = _cfg("\n".join([
+        "interface GigabitEthernet0/0",
+        " ip address 10.0.0.0 255.255.255.254",
+        "!",
+    ]))
+    errs, warns = validate_ip_formats(cfg)
+    assert errs == []
+    assert all("network address" not in w and "broadcast address" not in w
+               for w in warns), warns
+
+
+def test_dhcp_pool_default_router_before_network():
+    """default-router validates against the pool subnet regardless of child-line order."""
+    cfg = _cfg("\n".join([
+        "ip dhcp pool P",
+        " default-router 10.0.1.5",
+        " network 10.0.0.0 255.255.255.0",
+        "!",
+    ]))
+    errs, warns = validate_ip_formats(cfg)
+    # default-router 10.0.1.5 is NOT in 10.0.0.0/24, must produce a warning
+    assert any("not in the pool subnet" in w for w in warns), (errs, warns)
+
+
+def test_name_server_error_uses_standard_format():
+    """name-server validation errors use the standard line-prefix format."""
+    cfg = _cfg("ip name-server 999.1.1.1")
+    errs, warns = validate_ip_formats(cfg)
+    assert any(e.startswith("ERROR: line 0 (ip name-server):") for e in errs), errs
