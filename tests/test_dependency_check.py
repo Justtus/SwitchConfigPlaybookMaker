@@ -1,11 +1,18 @@
-from cisco_to_ansible import parse_config, build_playbook, run_dependency_check
+from cisco_to_ansible import parse_config, run_dependency_check
 
 
 def _cfg(text: str):
     return parse_config(text)
 
 
-def test_vrf_referenced_before_defined_warns():
+def test_vrf_reordered_before_interface_no_warning():
+    """VRF definitions land in Phase 3; interfaces land in Phase 4.
+
+    Even when the source config lists the interface before the vrf definition
+    block, the playbook builder re-orders them so the VRF is always emitted
+    (and therefore defined) before any interface that references it.  The
+    dependency checker should therefore emit no warning for this pattern.
+    """
     text = "\n".join([
         "interface GigabitEthernet0/0",
         " vrf forwarding MGMT",
@@ -16,7 +23,6 @@ def test_vrf_referenced_before_defined_warns():
         "!",
     ])
     cfg = _cfg(text)
-    build_playbook(cfg, host="sw", source_file="t.txt")
     warnings = run_dependency_check(cfg)
     # VRF definitions are Phase 3; interfaces are Phase 4. Even when the source
     # has the interface before the VRF definition, the emission re-orders them so
@@ -24,7 +30,15 @@ def test_vrf_referenced_before_defined_warns():
     assert not any("vrf forwarding MGMT" in w for w in warnings), warnings
 
 
-def test_flow_monitor_referenced_before_defined_warns():
+def test_flow_monitor_reordered_before_interface_no_warning():
+    """Flow-monitor definitions land in Phase 3; interfaces land in Phase 4.
+
+    Even when the source config lists the interface (with an ip flow monitor
+    reference) before the flow monitor definition block, the playbook builder
+    re-orders them so the flow monitor is always emitted (and therefore defined)
+    before any interface that references it.  The dependency checker should
+    therefore emit no warning for this pattern.
+    """
     text = "\n".join([
         "interface GigabitEthernet0/0",
         " ip flow monitor MON1 input",
@@ -34,7 +48,6 @@ def test_flow_monitor_referenced_before_defined_warns():
         "!",
     ])
     cfg = _cfg(text)
-    run_dependency_check(cfg)
     # The new ordering (interfaces are Phase 4, flow_monitors are Phase 3)
     # means the reference is now AFTER the definition. No warning.
     warnings = run_dependency_check(cfg)

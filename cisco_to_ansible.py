@@ -737,19 +737,24 @@ def build_playbook(cfg: ParsedConfig, host: str, source_file: str) -> str:
 # Dependency check (structural validation)
 # ---------------------------------------------------------------------------
 
-# Definition patterns: (regex, kind)
+# Each row: (compiled_regex, kind-key). The regex's group(1) must capture the
+# entity name. Kind-keys are matched against _REFERENCES rows.
 _DEFINITIONS = [
     (re.compile(r'^vrf definition (\S+)'), 'vrf'),
     (re.compile(r'^flow (?:record|exporter|monitor) (\S+)'), 'flow'),
     (re.compile(r'^ip access-list (?:standard|extended) (\S+)'), 'acl'),
     (re.compile(r'^route-map (\S+)'), 'route_map'),
-    (re.compile(r'^radius server (\S+)'), 'radius'),
+    (re.compile(r'^radius server (\S+)'), 'radius'),   # tracked for future aaa-group reference checks
     (re.compile(r'^snmp-server view (\S+)'), 'snmp_view'),
     (re.compile(r'^interface Vlan(\d+)', re.IGNORECASE), 'vlan_iface'),
-    (re.compile(r'^username (\S+)'), 'user'),
+    (re.compile(r'^username (\S+)'), 'user'),           # tracked for future auth reference checks
 ]
 
-# Reference patterns applied to every line of every ios_config task.
+# Reference patterns applied to every config line produced by _lines_of for
+# each task (ios_config, ios_vlans, ios_user, ios_interfaces, etc.).
+# Each pattern's group(1) captures the referenced entity name.
+# Each row: (compiled_regex, kind-key, label). label is the human-readable
+# type name used in warning text.
 _REFERENCES = [
     (re.compile(r'^vrf forwarding (\S+)'), 'vrf', 'VRF'),
     (re.compile(r'^ip flow monitor (\S+) (?:input|output)'), 'flow', 'flow monitor'),
@@ -800,6 +805,8 @@ def _lines_of(task: Task) -> list[str]:
             if k == "config":
                 return [f"interface {entry['name']}" for entry in v]
         return []
+    # Unknown or read-only modules (ios_facts, ios_command, set_fact, etc.)
+    # produce no config lines; ignore them.
     return []
 
 
@@ -826,6 +833,7 @@ def run_dependency_check(cfg: ParsedConfig) -> list[str]:
     for idx, task in enumerate(ordered_tasks):
         lines = _lines_of(task)
         # references must be checked BEFORE this task's own definitions are added
+        seen_in_task: set[tuple[str, str]] = set()
         for line in lines:
             for pat, kind, label in _REFERENCES:
                 m = pat.search(line)
@@ -833,16 +841,18 @@ def run_dependency_check(cfg: ParsedConfig) -> list[str]:
                     continue
                 name = m.group(1)
                 key = (kind, name)
-                if key not in defined:
-                    warnings.append(
-                        f"WARNING: task #{idx} \"{task.name}\" references "
-                        f"{label} {name} but it is never defined"
-                    )
-                elif key not in earlier_defined and defined[key] != idx:
-                    warnings.append(
-                        f"WARNING: task #{idx} \"{task.name}\" references "
-                        f"{label} {name} (defined later in task #{defined[key]})"
-                    )
+                if key not in seen_in_task:
+                    if key not in defined:
+                        warnings.append(
+                            f"WARNING: task #{idx} \"{task.name}\" references "
+                            f"{label} {name} but it is never defined"
+                        )
+                    elif key not in earlier_defined and defined[key] != idx:
+                        warnings.append(
+                            f"WARNING: task #{idx} \"{task.name}\" references "
+                            f"{label} {name} (defined later in task #{defined[key]})"
+                        )
+                seen_in_task.add(key)
         for line in lines:
             for pat, kind in _DEFINITIONS:
                 m = pat.match(line)
