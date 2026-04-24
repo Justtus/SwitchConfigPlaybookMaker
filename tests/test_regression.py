@@ -36,3 +36,17 @@ def test_baseline_matches_fixture(tmp_path):
         ))
         excerpt = "\n".join(diff[:40])
         pytest.fail(f"Generated YAML diverged from baseline fixture:\n{excerpt}")
+
+
+FIRMWARE_OUT = ROOT / "tests" / "fixtures" / "FRS-QRS-SW01.with-firmware.yml"
+
+
+def test_firmware_fixture_matches(tmp_path):
+    out = tmp_path / "generated.yml"
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(FIXTURE_IN),
+         "-o", str(out), "--with-upgrade"],
+        cwd=str(ROOT), capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert out.read_text(encoding="utf-8") == FIRMWARE_OUT.read_text(encoding="utf-8")
