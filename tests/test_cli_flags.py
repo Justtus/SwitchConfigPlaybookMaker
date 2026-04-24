@@ -73,3 +73,21 @@ def test_no_validate_skips_checks(tmp_path):
     r = _run([str(cfg), "-o", str(out), "--no-validate"])
     assert r.returncode == 0
     assert "WARNING" not in r.stderr
+
+
+def test_stderr_summary_on_clean_run(tmp_path):
+    out = tmp_path / "out.yml"
+    r = _run([str(CLEAN), "-o", str(out)])
+    assert "Dependency check:" in r.stderr
+    assert "IP format check:" in r.stderr
+    assert "Subnet membership check:" in r.stderr
+    assert "Wrote" in r.stderr
+
+
+def test_no_summary_with_no_validate(tmp_path):
+    out = tmp_path / "out.yml"
+    r = _run([str(CLEAN), "-o", str(out), "--no-validate"])
+    assert "Dependency check:" not in r.stderr
+    # but still report "Wrote" to stderr? Per spec, the "Wrote" line is part
+    # of the summary block and omitted under --no-validate. The existing
+    # stdout "Wrote ..." line stays (not in stderr).

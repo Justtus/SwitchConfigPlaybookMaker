@@ -1318,11 +1318,43 @@ def main(argv: list[str] | None = None) -> int:
     with open(out_path, 'w', encoding='utf-8', newline='\n') as fh:
         fh.write(playbook)
 
-    print(f'Wrote {out_path} ({len(playbook.splitlines())} lines).')
+    if not args.no_validate:
+        print(
+            f"Parsed {len(_all_blocks_count(cfg))} blocks, "
+            f"{len(cfg.interfaces)} interfaces, "
+            f"{len(cfg.vlans)} VLANs, "
+            f"{len(cfg.dhcp_pools)} DHCP pools from {args.input}",
+            file=sys.stderr,
+        )
+        print(f"Dependency check: {len(dep_warnings)} warnings", file=sys.stderr)
+        print(f"IP format check: {len(ip_errors)} errors, {len(ip_warnings)} warnings", file=sys.stderr)
+        print(f"Subnet membership check: {len(sm_hard) + len(sm_soft)} warnings "
+              f"({len(sm_hard)} hard, {len(sm_soft)} soft)", file=sys.stderr)
+        print(f"Wrote {out_path} ({len(playbook.splitlines())} lines, "
+              f"{_count_tasks(playbook)} tasks)", file=sys.stderr)
 
     if args.strict and (dep_warnings or ip_warnings or sm_hard):
         return 1
     return 0
+
+
+def _all_blocks_count(cfg: ParsedConfig) -> list:
+    out = []
+    for attr in ("base_services", "users", "aaa_new_model", "radius_servers", "aaa_auth",
+                 "ip_routing_globals", "vrfs", "vlans", "stp_globals", "acls", "route_maps",
+                 "flow_records", "flow_exporters", "flow_monitors", "snmp_views",
+                 "snmp_communities", "dhcp_excluded", "dhcp_pools", "interfaces", "bgp",
+                 "source_interface_globals", "logging", "ntp_servers", "ip_services",
+                 "banners", "line_blocks", "archive", "redundancy", "transceiver",
+                 "control_plane", "misc_blocks"):
+        val = getattr(cfg, attr, None)
+        if isinstance(val, list):
+            out.extend(val)
+    return out
+
+
+def _count_tasks(yaml_text: str) -> int:
+    return sum(1 for line in yaml_text.splitlines() if line.lstrip().startswith("- name:"))
 
 
 if __name__ == '__main__':
